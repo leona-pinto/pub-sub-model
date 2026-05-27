@@ -1,15 +1,5 @@
-try:
-    import paho.mqtt.client as mqtt
-except ModuleNotFoundError:
-    print("Error: The 'paho-mqtt' package is not installed. Please install it using 'pip install paho-mqtt' and try again.")
-    exit(1)
-
-try:
-    from kafka import KafkaProducer
-except ModuleNotFoundError:
-    print("Error: The 'kafka-python' package is not installed. Please install it using 'pip install kafka-python' and try again.")
-    exit(1)
-
+import paho.mqtt.client as mqtt
+from kafka import KafkaProducer
 import json
 import time
 import threading
@@ -32,7 +22,6 @@ MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 KAFKA_BROKER = os.getenv("KAFKA_BROKER")
 KAFKA_TOPIC = os.getenv("KAFKA_TOPIC")
 
-# Validate required environment variables
 missing_vars = []
 if not MQTT_BROKER:
     missing_vars.append("MQTT_BROKER")
@@ -46,7 +35,7 @@ if not MQTT_PASSWORD:
     missing_vars.append("MQTT_PASSWORD")
 
 if missing_vars:
-    print(f"\n❌ Error: Missing environment variables: {', '.join(missing_vars)}")
+    print(f"\n Error: Missing environment variables: {', '.join(missing_vars)}")
     print("\nCreate a .env file in the project root with the following variables:")
     exit(1)
 
@@ -69,7 +58,7 @@ kafka_producer = KafkaProducer(
 
 def create_saref_message(gps_data, temperature):
     """
-    Create a JSON-LD message following ETSI SAREF Ontology v4 for smart home proximity detection
+    Create a JSON-LD message following ETSI SAREF Ontology 
     """
     timestamp = datetime.now().isoformat()
 
@@ -200,10 +189,10 @@ mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
 mqtt_thread = threading.Thread(target=mqtt_client.loop_forever, daemon=True)
 mqtt_thread.start()
 
-# Give MQTT time to connect
+# Publish frequency
 time.sleep(2)
 
-# Start publishing SAREF messages
+# Publish SAREF messages
 try:
     publish_saref_messages()
 except KeyboardInterrupt:

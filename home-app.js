@@ -64,9 +64,8 @@ const barbecueConsumer = kafka.consumer({ groupId: BARBECUE_CONSUMER_GROUP });
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Serve hvac.html at root
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'hvac.html'));
+  res.sendFile(path.join(__dirname, 'public', 'smartHome.html'));
 });
 
 // Calculate distance between two GPS coordinates using Haversine formula
@@ -141,7 +140,6 @@ async function startHvacSubscriber() {
 
           const previousState = deviceState.devices.hvac.isPowerOn;
 
-          // HVAC Logic: Turn ON if car is within threshold
           if (distance <= HVAC_THRESHOLD_KM) {
             deviceState.devices.hvac.isPowerOn = true;
             if (temperature > 25) {
@@ -188,7 +186,6 @@ async function startTvSubscriber() {
 
           const previousState = deviceState.devices.tv.isPowerOn;
 
-          // TV Logic: Turn ON if car is within threshold
           if (distance <= TV_THRESHOLD_KM) {
             deviceState.devices.tv.isPowerOn = true;
           } else {
@@ -229,7 +226,6 @@ async function startBarbecueSubscriber() {
 
           const previousState = deviceState.devices.barbecue.isPowerOn;
 
-          // Barbecue Logic: Turn OFF if car is far, ON if close
           if (distance > BARBECUE_THRESHOLD_KM) {
             deviceState.devices.barbecue.isPowerOn = false;
           } else {
@@ -277,13 +273,11 @@ server.listen(PORT, () => {
 
   console.log(`Starting subscribers...\n`);
 
-  // Start all three subscribers in parallel
   startHvacSubscriber().catch(err => console.error('HVAC subscriber error:', err));
   startTvSubscriber().catch(err => console.error('TV subscriber error:', err));
   startBarbecueSubscriber().catch(err => console.error('Barbecue subscriber error:', err));
 });
 
-// Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\n\nShutting down all subscribers...');
   Promise.all([
