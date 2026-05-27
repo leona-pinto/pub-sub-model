@@ -1,0 +1,23 @@
+{
+  "dependencies": {
+    "axios": "^1.16.1",
+    "express": "^5.2.1",
+    "kafkajs": "^2.2.4",
+    "n3": "^2.0.3",
+    "socket.io": "^4.8.3"
+  },
+  "name": "pub-sub-model",
+  "description": "- **Node.js** v14+\r - **Python 3.x**\r - **Kafka** running on `localhost:9092`",
+  "version": "1.0.0",
+  "main": "hvac-server.js",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

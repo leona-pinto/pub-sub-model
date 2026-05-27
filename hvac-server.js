@@ -4,6 +4,12 @@ const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
 
+// needed for RDF/ knowledge graph 
+const axios = require('axios');
+const { DataFactory, Writer } = require('n3');
+
+const { namedNode, literal, quad } = DataFactory;
+
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
@@ -14,6 +20,12 @@ const io = socketIo(server, {
 const KAFKA_BROKER = 'localhost:9092';
 const KAFKA_TOPIC = 'trackers.HTIT_51.gps';
 const CONSUMER_GROUP = 'hvac-subscriber-group';
+
+// GraphDB 
+const GRAPHDB_ENDPOINT =
+  'http://localhost:7200/repositories/smart-home/statements';
+
+const RDF_PREFIX = 'http://example.org/';
 
 // House location (hard-coded) - Within 3km of GPS tracker
 const HOUSE_LAT = 52.2180;
@@ -123,6 +135,79 @@ function updateHvacState(distance, temperature, latitude, longitude) {
   return previousState !== hvacState;
 }
 
+// making rdf triples out of message & uploading to GraphDB
+async function storeInGraphDB(hvacState, temperature, distance) {
+
+  const writer = new Writer({
+    prefixes: {
+      ex: RDF_PREFIX
+    }
+  });
+
+  const timestamp = hvacState.lastUpdate;
+  const messageId = `Message_${Date.now()}`;
+
+  const messageNode = namedNode(`${RDF_PREFIX}${messageId}`);
+  const hvacNode = namedNode(`${RDF_PREFIX}HVAC1`);
+
+  writer.addQuad(
+    messageNode,
+    namedNode(`${RDF_PREFIX}hasTemperature`),
+    literal(String(temperature))
+  );
+
+  writer.addQuad(
+    messageNode,
+    namedNode(`${RDF_PREFIX}hasDistance`),
+    literal(String(distance))
+  );
+
+  writer.addQuad(
+    messageNode,
+    namedNode(`${RDF_PREFIX}hasState`),
+    literal(hvacState.mode)
+  );
+
+  writer.addQuad(
+    messageNode,
+    namedNode(`${RDF_PREFIX}hasTimestamp`),
+    literal(timestamp)
+  );
+
+  writer.addQuad(
+    messageNode,
+    namedNode(`${RDF_PREFIX}receivedBy`),
+    hvacNode
+  );
+
+  writer.end(async (error, result) => {
+
+    if (error) {
+      console.error('RDF generation error:', error);
+      return;
+    }
+
+    try {
+
+      await axios.post(
+        GRAPHDB_ENDPOINT,
+        result,
+        {
+          headers: {
+            'Content-Type': 'text/turtle'
+          }
+        }
+      );
+
+      console.log('Stored RDF in GraphDB');
+
+    } catch (err) {
+
+      console.error('GraphDB upload failed:', err.message);
+    }
+  });
+}
+
 // Kafka consumer setup
 async function startHvacSubscriber() {
   await consumer.connect();
@@ -134,13 +219,16 @@ async function startHvacSubscriber() {
 
   await consumer.run({
     eachMessage: async ({ topic, partition, message }) => {
+      console.log("RAW MESSAGE:", message.value.toString());
       try {
         const sarefMsg = JSON.parse(message.value.toString());
         const { distance, temperature, latitude, longitude } = extractDataFromSarefMessage(sarefMsg);
 
         if (distance !== null && temperature !== null) {
           const stateChanged = updateHvacState(distance, temperature, latitude, longitude);
-
+          await storeInGraphDB(
+                  hvacState, temperature, distance, sarefMsg
+          );
           // Log the update
           console.log(`\n Received SAREF Message:`);
           console.log(`   Distance from home: ${distance.toFixed(2)} km`);
