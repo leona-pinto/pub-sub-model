@@ -1,5 +1,5 @@
 const express = require('express');
-const { Kafka } = require('kafkajs');
+const { Kafka, Partitioners } = require('kafkajs');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
@@ -81,6 +81,7 @@ let deviceState = {
   }
 };
 
+
 // Initialize Kafka
 const kafka = new Kafka({
   clientId: 'smart-home-subscriber',
@@ -92,12 +93,23 @@ const hvacConsumer = kafka.consumer({ groupId: HVAC_CONSUMER_GROUP });
 const tvConsumer = kafka.consumer({ groupId: TV_CONSUMER_GROUP });
 const barbecueConsumer = kafka.consumer({ groupId: BARBECUE_CONSUMER_GROUP });
 
+// Producer is used by the Digital Twin to send commands back to physical devices
+const producer = kafka.producer({ createPartitioner: Partitioners.LegacyPartitioner });
+
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'smartHome.html'));
 });
+
+//  Express 
+
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'smartHome.html'));
+});
+
 
 // Calculate distance between two GPS coordinates using Haversine formula
 function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -287,7 +299,42 @@ async function storeInGraphDB(
   });
 }
 
-   
+   //  Digital Twin — publish state back to broker 
+ 
+// Called whenever the DT wants to inform the physical device of its new state.
+// 
+
+async function publishDeviceState(deviceName, state) {
+  const stateMessage = {
+    "@context": { "saref": "https://saref.etsi.org/core/" },
+    "@type": "saref:State",
+    "saref:hasState": { "@value": state }
+  };
+ 
+  await producer.send({
+    topic: `home.${deviceName}.state`,
+    messages: [{ value: JSON.stringify(stateMessage) }]
+  });
+ 
+  console.log(`[${deviceName.toUpperCase()}] State published -> home.${deviceName}.state: ${state}`);
+}
+async function createTopicsIfNeeded() {
+  const admin = kafka.admin();
+  await admin.connect();
+  await admin.createTopics({
+    waitForLeaders: true,
+    topics: [
+      { topic: 'home.hvac.command',  numPartitions: 1 },
+      { topic: 'home.tv.command',    numPartitions: 1 },
+      { topic: 'home.bbq.command',   numPartitions: 1 },
+      { topic: 'home.hvac.state',    numPartitions: 1 },
+      { topic: 'home.tv.state',      numPartitions: 1 },
+      { topic: 'home.bbq.state',     numPartitions: 1 },
+    ]
+  });
+  await admin.disconnect();
+  console.log('[Kafka] Topics ready');
+}
 
 // HVAC Subscriber Logic
 async function startHvacSubscriber() {
@@ -295,12 +342,35 @@ async function startHvacSubscriber() {
   console.log('[HVAC] Kafka consumer connected');
 
   await hvacConsumer.subscribe({ topic: KAFKA_TOPIC, fromBeginning: false });
-  console.log('[HVAC] Subscribed to Kafka topic');
+  // console.log('[HVAC] Subscribed to Kafka topic');
+   await hvacConsumer.subscribe({ topic: 'home.hvac.command',  fromBeginning: false });
+  console.log('[HVAC] Subscribed to GPS + command topics');
 
   await hvacConsumer.run({
     eachMessage: async ({ topic, partition, message }) => {
       try {
         const sarefMsg = JSON.parse(message.value.toString());
+// Handle DT → PT commands 
+        if (topic === 'home.hvac.command') {
+         const cmd = sarefMsg?.['saref:hasCommandKind'];
+          console.log(`[HVAC] Command received: ${cmd}`);
+ 
+          if (cmd === 'TURN_ON' || cmd === 'TurnOn') {
+            deviceState.devices.hvac.isPowerOn = true;
+            deviceState.devices.hvac.mode = 'HEATING';
+          }
+          if (cmd === 'TURN_OFF' || cmd === 'TurnOff') {
+            deviceState.devices.hvac.isPowerOn = false;
+            deviceState.devices.hvac.mode = 'OFF';
+          }
+ 
+          await publishDeviceState('hvac', deviceState.devices.hvac.mode);
+          io.emit('device-state-update', deviceState);
+          return;
+        }
+
+//  Handle PT → DT GPS 
+
         const { distance, temperature, latitude, longitude } = extractDataFromSarefMessage(sarefMsg);
 
         if (distance !== null && temperature !== null) {
@@ -333,6 +403,7 @@ async function startHvacSubscriber() {
 
           if (previousState !== deviceState.devices.hvac.isPowerOn) {
             console.log(`[HVAC] State changed!\n`);
+             await publishDeviceState('hvac', deviceState.devices.hvac.mode);
           }
 
           io.emit('device-state-update', deviceState);
@@ -350,12 +421,29 @@ async function startTvSubscriber() {
   console.log('[TV] Kafka consumer connected');
 
   await tvConsumer.subscribe({ topic: KAFKA_TOPIC, fromBeginning: false });
+  await tvConsumer.subscribe({ topic: 'home.tv.command',   fromBeginning: false });
   console.log('[TV] Subscribed to Kafka topic');
 
   await tvConsumer.run({
     eachMessage: async ({ topic, partition, message }) => {
       try {
         const sarefMsg = JSON.parse(message.value.toString());
+
+ //  Handle DT → PT commands 
+      if (topic === 'home.tv.command') {
+          const cmd = sarefMsg?.['saref:hasCommandKind'];
+          console.log(`[TV] Command received: ${cmd}`);
+ 
+          if (!cmd) return;
+          if (cmd === 'TurnOn')  deviceState.devices.tv.isPowerOn = true;
+          if (cmd === 'TurnOff') deviceState.devices.tv.isPowerOn = false;
+ 
+          await publishDeviceState('tv', deviceState.devices.tv.isPowerOn ? 'ON' : 'OFF');
+          io.emit('device-state-update', deviceState);
+          return;
+        }
+
+//  Handle PT → DT GPS 
         const { distance, temperature, latitude, longitude } = extractDataFromSarefMessage(sarefMsg);
 
         if (distance !== null && temperature !== null) {
@@ -383,6 +471,7 @@ async function startTvSubscriber() {
 
           if (previousState !== deviceState.devices.tv.isPowerOn) {
             console.log(`[TV] State changed!\n`);
+             await publishDeviceState('tv', deviceState.devices.tv.isPowerOn ? 'ON' : 'OFF');
           }
 
           io.emit('device-state-update', deviceState);
@@ -400,12 +489,30 @@ async function startBarbecueSubscriber() {
   console.log('[BARBECUE] Kafka consumer connected');
 
   await barbecueConsumer.subscribe({ topic: KAFKA_TOPIC, fromBeginning: false });
-  console.log('[BARBECUE] Subscribed to Kafka topic');
+  await barbecueConsumer.subscribe({ topic: 'home.bbq.command',  fromBeginning: false });
+  console.log('[BARBECUE] Subscribed to GPS + command topics');
 
   await barbecueConsumer.run({
     eachMessage: async ({ topic, partition, message }) => {
       try {
         const sarefMsg = JSON.parse(message.value.toString());
+ //  Handle DT → PT commands 
+        if (topic === 'home.bbq.command') {
+          const cmd = sarefMsg?.['saref:hasCommandKind'];
+
+          console.log(`[BARBECUE] Command received: ${cmd}`);
+ 
+          if (!cmd) return;
+          if (cmd === 'TurnOn')  deviceState.devices.barbecue.isPowerOn = true;
+          if (cmd === 'TurnOff') deviceState.devices.barbecue.isPowerOn = false;
+ 
+          await publishDeviceState('bbq', deviceState.devices.barbecue.isPowerOn ? 'ON' : 'OFF');
+          io.emit('device-state-update', deviceState);
+          return;
+        }
+
+// Handle PT → DT GPS 
+
         const { distance, temperature, latitude, longitude } = extractDataFromSarefMessage(sarefMsg);
 
         if (distance !== null && temperature !== null) {
@@ -432,6 +539,7 @@ async function startBarbecueSubscriber() {
 
           if (previousState !== deviceState.devices.barbecue.isPowerOn) {
             console.log(`[BARBECUE] State changed!\n`);
+             await publishDeviceState('bbq', deviceState.devices.barbecue.isPowerOn ? 'ON' : 'OFF');
           }
 
           io.emit('device-state-update', deviceState);
@@ -486,31 +594,25 @@ io.on('connection', (socket) => {
 
 // Start server
 const PORT = 3000;
-server.listen(PORT, () => {
-  console.log(`\n=== Smart Home Multi-Device Subscriber ===`);
-  console.log(`Running on http://localhost:${PORT}`);
-  console.log(`House Location: ${HOUSE_LAT}, ${HOUSE_LON}\n`);
 
-  console.log(`Device Thresholds:`);
-  console.log(`  HVAC: ${HVAC_THRESHOLD_KM} km (separate consumer group)`);
-  console.log(`  Smart TV: ${TV_THRESHOLD_KM} km (separate consumer group)`);
-  console.log(`  Barbecue: ${BARBECUE_THRESHOLD_KM} km (separate consumer group)\n`);
+async function start() {
+  await createTopicsIfNeeded();
+  await producer.connect();
 
-  console.log(`Starting subscribers...\n`);
+  server.listen(PORT, () => {
+    console.log(`\n=== Smart Home Multi-Device Subscriber ===`);
+    console.log(`Running on http://localhost:${PORT}`);
+    console.log(`House Location: ${HOUSE_LAT}, ${HOUSE_LON}\n`);
+    console.log(`Device Thresholds:`);
+    console.log(`  HVAC: ${HVAC_THRESHOLD_KM} km (separate consumer group)`);
+    console.log(`  Smart TV: ${TV_THRESHOLD_KM} km (separate consumer group)`);
+    console.log(`  Barbecue: ${BARBECUE_THRESHOLD_KM} km (separate consumer group)\n`);
+    console.log(`Starting subscribers...\n`);
 
-  startHvacSubscriber().catch(err => console.error('HVAC subscriber error:', err));
-  startTvSubscriber().catch(err => console.error('TV subscriber error:', err));
-  startBarbecueSubscriber().catch(err => console.error('Barbecue subscriber error:', err));
-});
-
-process.on('SIGINT', () => {
-  console.log('\n\nShutting down all subscribers...');
-  Promise.all([
-    hvacConsumer.disconnect(),
-    tvConsumer.disconnect(),
-    barbecueConsumer.disconnect()
-  ]).then(() => {
-    server.close();
-    process.exit(0);
+    startHvacSubscriber().catch(err => console.error('HVAC subscriber error:', err));
+    startTvSubscriber().catch(err => console.error('TV subscriber error:', err));
+    startBarbecueSubscriber().catch(err => console.error('Barbecue subscriber error:', err));
   });
-});
+}
+
+start().catch(console.error);
