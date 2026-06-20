@@ -1,17 +1,15 @@
 const express = require('express');
-const path = require('path');
-const http = require('http');
+const path    = require('path');
+const http    = require('http');
 const { Server } = require('socket.io');
-const { Kafka } = require('kafkajs');
-const axios = require('axios');
+const mqtt   = require('mqtt');
+const axios  = require('axios');
 
-/* 
-   EXPRESS + SOCKET SETUP
- */
+// ── Express + Socket.io ───────────────────────────────────────────────────────
 
-const app = express();
+const app    = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io     = new Server(server);
 
 const PORT = 4000;
 app.use(express.json());
@@ -25,9 +23,8 @@ app.get('/ui', (req, res) => {
 // Command endpoint — called by the UI buttons
 app.post('/api/command', async (req, res) => {
   const { device, command } = req.body;
-
   try {
-    await sendCommand(device, command);
+    sendCommand(device, command);
     res.json({ success: true });
   } catch (err) {
     console.error('[API] Command failed:', err.message);
@@ -35,58 +32,36 @@ app.post('/api/command', async (req, res) => {
   }
 });
 
-/* 
-   KAFKA SETUP
+// ── MQTT topics ───────────────────────────────────────────────────────────────
 
-   */
+const MQTT_BROKER = 'mqtt://localhost:1883';
 
-const kafka = new Kafka({
-  clientId: 'digital-twin',
-  brokers: ['localhost:9092']
-});
+// DT listens to these (PT → DT state updates)
+const TOPIC_HVAC_STATE = 'home/hvac/state';
+const TOPIC_TV_STATE   = 'home/tv/state';
+const TOPIC_BBQ_STATE  = 'home/bbq/state';
 
-const consumer = kafka.consumer({
-  groupId: 'digital-twin-group-' + Date.now()
-});
+// DT publishes to these (DT → PT commands)
+const TOPIC_HVAC_COMMAND = 'home/hvac/command';
+const TOPIC_TV_COMMAND   = 'home/tv/command';
+const TOPIC_BBQ_COMMAND  = 'home/bbq/command';
 
-const producer = kafka.producer();
+// ── Digital Twin state ────────────────────────────────────────────────────────
 
-const STATE_TOPICS = [
-  'home.tv.state',
-  'home.hvac.state',
-  'home.bbq.state'
-];
+const latestState = { tv: null, hvac: null, bbq: null };
+const history     = { tv: [],   hvac: [],   bbq: []   };
 
-/* 
-   DIGITAL TWIN STATE, DT needs to know and display the states at all times
-*/
-
-const latestState = {
-  tv: null,
-  hvac: null,
-  bbq: null
-};
-
-const history = {
-  tv: [],
-  hvac: [],
-  bbq: []
-};
-
-/* 
-   GRAPHDB STORAGE
-    */
+// ── GraphDB ───────────────────────────────────────────────────────────────────
 
 async function storeStateTriple(device, state, timestamp) {
   const rdf = `
 INSERT DATA {
   GRAPH <http://example.org/dt> {
     <http://example.org/${device}>
-      <http://example.org/hasState> "${state}" ;
+      <http://example.org/hasState>     "${state}" ;
       <http://example.org/hasTimestamp> "${timestamp}" .
   }
 }`;
-
   await axios.post(
     'http://localhost:7200/repositories/smart-home/statements',
     rdf,
@@ -99,11 +74,10 @@ async function storeCommandTriple(device, command, timestamp) {
 INSERT DATA {
   GRAPH <http://example.org/dt> {
     <http://example.org/${device}/command/${timestamp}>
-      <http://example.org/hasCommand> "${command}" ;
+      <http://example.org/hasCommand>   "${command}" ;
       <http://example.org/hasTimestamp> "${timestamp}" .
   }
 }`;
-
   await axios.post(
     'http://localhost:7200/repositories/smart-home/statements',
     rdf,
@@ -111,112 +85,122 @@ INSERT DATA {
   );
 }
 
-/* 
-   SEND COMMAND (DT → PT)
-   Uses saref:hasCommandKind 
-*/
+// ── Send command (DT → PT) ────────────────────────────────────────────────────
 
-async function sendCommand(device, command) {
-  const topic = `home.${device}.command`;
-
-  const message = {
-    "@context": {
-      "saref": "https://saref.etsi.org/core/"
-    },
-    "@type": "saref:Command",
-    "saref:actsUpon": device,
-    "saref:hasCommandKind": command  //  home-app reads this field
+function sendCommand(device, command) {
+  const topicMap = {
+    hvac: TOPIC_HVAC_COMMAND,
+    tv:   TOPIC_TV_COMMAND,
+    bbq:  TOPIC_BBQ_COMMAND
   };
 
-  await producer.send({
-    topic,
-    messages: [{ value: JSON.stringify(message) }]
-  });
-
-  const timestamp = new Date().toISOString();
-  console.log(`[DT COMMAND] ${device.toUpperCase()} <- ${command} @ ${timestamp}`);
-
-  try {
-    await storeCommandTriple(device, command, timestamp);
-  } catch (err) {
-    console.error('[GraphDB] Command store failed:', err.message);
+  const topic = topicMap[device];
+  if (!topic) {
+    console.warn(`[DT] Unknown device: ${device}`);
+    return;
   }
+
+  const message = {
+    "@context": { "saref": "https://saref.etsi.org/core/" },
+    "@type": "saref:Command",
+    "saref:actsUpon": device,
+    "saref:hasCommandKind": command   // home-app.js reads this field
+  };
+
+  mqttClient.publish(topic, JSON.stringify(message), { qos: 1 }, (err) => {
+    if (err) {
+      console.error(`[DT] Command publish failed:`, err.message);
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    console.log(`[DT COMMAND] ${device.toUpperCase()} <- ${command} @ ${timestamp}`);
+
+    storeCommandTriple(device, command, timestamp).catch(err =>
+      console.error('[GraphDB] Command store failed:', err.message)
+    );
+  });
 }
 
-/*
-   STATE EXTRACTION
-
-   */
+// ── Extract state from SAREF state message ────────────────────────────────────
 
 function extractState(payload) {
-  // State messages from home-app look like:
-  // { "@type": "saref:State", "saref:hasState": { "@value": "ON" } }
   return payload?.["saref:hasState"]?.["@value"] || null;
 }
 
-/* 
-   KAFKA CONSUMER
- */
+// ── MQTT client ───────────────────────────────────────────────────────────────
 
-async function start() {
-  await producer.connect();
-  await consumer.connect();
+const mqttClient = mqtt.connect(MQTT_BROKER);
 
-  for (const topic of STATE_TOPICS) {
-    await consumer.subscribe({ topic, fromBeginning: false });
-  }
+mqttClient.on('connect', () => {
+  console.log('[DT] Connected to MQTT broker');
 
+  // Subscribe to state topics (home-app publishes here when device state changes)
+  mqttClient.subscribe(TOPIC_HVAC_STATE, { qos: 1 });
+  mqttClient.subscribe(TOPIC_TV_STATE,   { qos: 1 });
+  mqttClient.subscribe(TOPIC_BBQ_STATE,  { qos: 1 });
   console.log('[DT] Subscribed to state topics');
+});
 
-  await consumer.run({
-    eachMessage: async ({ topic, message }) => {
-      const raw = message.value.toString();
-      const payload = JSON.parse(raw);
-      const timestamp = new Date().toISOString();
+mqttClient.on('error', (err) => {
+  console.error('[DT] MQTT error:', err.message);
+});
 
-      let device = null;
-      if (topic.includes('tv'))   device = 'tv';
-      if (topic.includes('hvac')) device = 'hvac';
-      if (topic.includes('bbq'))  device = 'bbq';
+mqttClient.on('message', (topic, payload) => {
+  try {
+    const msg       = JSON.parse(payload.toString());
+    const timestamp = new Date().toISOString();
 
-      if (!device) return;
+    // Map topic → device name
+    let device = null;
+    if (topic === TOPIC_TV_STATE)   device = 'tv';
+    if (topic === TOPIC_HVAC_STATE) device = 'hvac';
+    if (topic === TOPIC_BBQ_STATE)  device = 'bbq';
+    if (!device) return;
 
-      const state = extractState(payload);
-
-      if (!state) {
-        console.warn(`[DT] No state found in ${topic}:`, payload);
-        return;
-      }
-
-      // Update twin state
-      latestState[device] = { state, timestamp };
-      history[device].push({ state, timestamp });
-
-      console.log(`[DT] ${device.toUpperCase()} state: ${state}`);
-
-      // Store in GraphDB
-      try {
-        await storeStateTriple(device, state, timestamp);
-      } catch (err) {
-        console.error('[GraphDB] State store failed:', err.message);
-      }
-
-      // Push to UI
-      io.emit('device-state-update', { latestState, history });
+    const state = extractState(msg);
+    if (!state) {
+      console.warn(`[DT] No state found in ${topic}:`, msg);
+      return;
     }
-  });
-}
 
-/* 
-   START SERVER
- */
+    // Update twin state
+    latestState[device] = { state, timestamp };
+    history[device].push({ state, timestamp });
+    console.log(`[DT] ${device.toUpperCase()} state updated: ${state}`);
+
+    // Store in GraphDB
+    storeStateTriple(device, state, timestamp).catch(err =>
+      console.error('[GraphDB] State store failed:', err.message)
+    );
+
+    // Push to UI
+    io.emit('device-state-update', { latestState, history });
+
+  } catch (err) {
+    console.error('[DT] Error processing message:', err.message);
+  }
+});
+
+// ── Socket.io ─────────────────────────────────────────────────────────────────
 
 io.on('connection', (socket) => {
-  // Send current state immediately to the newly connected client
+  console.log('[DT] UI client connected');
+  // Send current state immediately to newly connected client
   socket.emit('device-state-update', { latestState, history });
 });
 
+// ── Start ─────────────────────────────────────────────────────────────────────
+
 server.listen(PORT, () => {
   console.log(`[DT] UI running on http://localhost:${PORT}/ui`);
-  start().catch(console.error);
+});
+
+// ── Graceful shutdown ─────────────────────────────────────────────────────────
+
+process.on('SIGINT', () => {
+  console.log('\n[DT] Shutting down...');
+  mqttClient.end();
+  server.close();
+  process.exit(0);
 });

@@ -1,24 +1,25 @@
 const socket = io();
 
-// Update HVAC state from server
-socket.on('hvac-state-update', (hvacState) => {
-  updateDisplay(hvacState);
+socket.on('device-state-update', (deviceState) => {
+  updateDisplay(deviceState);
 });
 
-function updateDisplay(hvacState) {
-  // Update GPS data
-  document.getElementById('latitude').textContent = hvacState.carLatitude?.toFixed(4) || '--';
-  document.getElementById('longitude').textContent = hvacState.carLongitude?.toFixed(4) || '--';
+function updateDisplay(deviceState) {
+  const hvac = deviceState.devices.hvac;
 
-  if (hvacState.carDistance !== null) {
-    document.getElementById('distance').textContent = hvacState.carDistance.toFixed(2);
+  // GPS data
+  document.getElementById('latitude').textContent  = deviceState.carLatitude?.toFixed(4)  || '--';
+  document.getElementById('longitude').textContent = deviceState.carLongitude?.toFixed(4) || '--';
+
+  if (deviceState.carDistance !== null) {
+    document.getElementById('distance').textContent = deviceState.carDistance.toFixed(2);
   }
 
-  document.getElementById('temperature').textContent = hvacState.currentTemp.toFixed(1);
+  document.getElementById('temperature').textContent = deviceState.currentTemp?.toFixed(1) || '--';
 
-  // Update HVAC Power Status (ON if distance <= 3km, OFF otherwise)
+  // HVAC Power
   const hvacPower = document.getElementById('hvac-power');
-  if (hvacState.isPowerOn) {
+  if (hvac.isPowerOn) {
     hvacPower.classList.add('on');
     hvacPower.classList.remove('off');
     hvacPower.querySelector('.status-icon').textContent = '🟢';
@@ -30,9 +31,9 @@ function updateDisplay(hvacState) {
     hvacPower.querySelector('.status-text').textContent = 'OFF';
   }
 
-  // Update Cooling Status (ON if mode is COOLING)
+  // Cooling
   const coolingStatus = document.getElementById('cooling-status');
-  if (hvacState.mode === 'COOLING') {
+  if (hvac.mode === 'COOLING') {
     coolingStatus.classList.add('on');
     coolingStatus.classList.remove('off');
     coolingStatus.querySelector('.status-icon').textContent = '🟦';
@@ -44,9 +45,9 @@ function updateDisplay(hvacState) {
     coolingStatus.querySelector('.status-text').textContent = 'OFF';
   }
 
-  // Update Heating Status (ON if mode is HEATING)
+  // Heating
   const heatingStatus = document.getElementById('heating-status');
-  if (hvacState.mode === 'HEATING') {
+  if (hvac.mode === 'HEATING') {
     heatingStatus.classList.add('on');
     heatingStatus.classList.remove('off');
     heatingStatus.querySelector('.status-icon').textContent = '🟥';
@@ -58,5 +59,3 @@ function updateDisplay(hvacState) {
     heatingStatus.querySelector('.status-text').textContent = 'OFF';
   }
 }
-
-console.log('🚀 Smart HVAC Subscriber loaded');
