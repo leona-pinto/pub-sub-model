@@ -91,6 +91,7 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+/* 
 function extractDataFromSarefMessage(sarefMsg) {
   let temperature = null;
   let latitude    = null;
@@ -117,6 +118,7 @@ function extractDataFromSarefMessage(sarefMsg) {
 
   return { distance, temperature, latitude, longitude };
 }
+*/ 
 
 function updateLocationData(distance, temperature, latitude, longitude) {
   deviceState.carDistance  = distance;
@@ -126,9 +128,58 @@ function updateLocationData(distance, temperature, latitude, longitude) {
   deviceState.lastUpdate   = new Date().toISOString();
   deviceState.messageCount++;
 }
+  
+function extractDataFromSarefMessage(sarefMsg) {
+  let temperature = null;
+  let latitude = null;
+  let longitude = null;
+
+  const measurements = sarefMsg['saref:hasMeasurement'] || [];
+
+  for (const m of measurements) {
+    const value = m['saref:hasValue']?.['@value'];
+    const property = m['saref:relatesToProperty'];
+    const types = [].concat(property?.['@type'] || []);
+
+    // -------------------
+    // TEMPERATURE
+    // -------------------
+    if (
+      types.includes('saref:Temperature') ||
+      types.includes('saref:TemperatureProperty')
+    ) {
+      temperature = value;
+    }
+
+    // -------------------
+    // LOCATION
+    // -------------------
+    if (
+      types.includes('geo:Point') ||
+      types.includes('saref:Location') ||
+      types.includes('saref:LocationProperty')
+    ) {
+      latitude = property?.['geo:lat'];
+      longitude = property?.['geo:long'];
+    }
+  }
+
+  let distance = null;
+
+  if (latitude != null && longitude != null) {
+    distance = calculateDistance(
+      Number(latitude),
+      Number(longitude),
+      HOUSE_LAT,
+      HOUSE_LON
+    );
+  }
+
+  return { distance, temperature, latitude, longitude };
+}
 
 // GraphDB 
-
+/*
 async function storeInGraphDB(deviceName, devState, temperature, distance, graphIRI) {
   const writer = new Writer({
     format: 'application/trig',
@@ -166,7 +217,85 @@ async function storeInGraphDB(deviceName, devState, temperature, distance, graph
     }
   });
 }
+*/ 
 
+
+async function storeInGraphDB(deviceName, devState, temperature, distance, graphIRI) {
+  const writer = new Writer({
+    format: 'application/trig',
+    prefixes: {
+      ex: RDF_PREFIX,
+      saref: SAREF,
+      geo: GEO,
+      rdf: RDF,
+      dcterms: DCT
+    }
+  });
+
+  const graphNode   = namedNode(graphIRI);
+  const uniqueId    = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+  const messageNode = namedNode(`${RDF_PREFIX}message_${uniqueId}`);
+  const deviceNode  = namedNode(`${RDF_PREFIX}device_${deviceName}`);
+
+  // --- Message ---
+  writer.addQuad(messageNode, namedNode(`${RDF}type`), namedNode(`${SAREF}Command`), graphNode);
+  writer.addQuad(messageNode, namedNode(`${DCT}issued`), literal(new Date().toISOString()), graphNode);
+
+  // --- Device ---
+  writer.addQuad(messageNode, namedNode(`${SAREF}actsUpon`), deviceNode, graphNode);
+
+  const normalizedState =
+  typeof devState === "string"
+    ? devState
+    : devState?.mode ??
+      (devState?.isPowerOn !== undefined
+        ? (devState.isPowerOn ? "ON" : "OFF")
+        : "UNKNOWN");
+
+writer.addQuad(
+  messageNode,
+  namedNode(`${SAREF}hasCommandKind`),
+  literal(normalizedState),
+  graphNode
+);
+  
+  // --- Sensor-derived context (optional enrichment) ---
+  if (temperature != null) {
+    writer.addQuad(
+      messageNode,
+      namedNode(`${RDF_PREFIX}temperature`),
+      literal(String(temperature)),
+      graphNode
+    );
+  }
+
+  if (distance != null) {
+    writer.addQuad(
+      messageNode,
+      namedNode(`${RDF_PREFIX}distance`),
+      literal(String(distance)),
+      graphNode
+    );
+  }
+
+  writer.end(async (error, result) => {
+    if (error) {
+      console.error("RDF generation error:", error);
+      return;
+    }
+
+    try {
+      await axios.post(GRAPHDB_ENDPOINT, result, {
+        headers: { "Content-Type": "application/trig" }
+      });
+
+      console.log(`[GraphDB] Stored RDF (${graphIRI})`);
+    } catch (err) {
+      console.error("[GraphDB] Write failed:", err.message);
+    }
+  });
+}
 async function processGraphQueue() {
   if (graphProcessing) return;
   graphProcessing = true;

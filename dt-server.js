@@ -73,11 +73,19 @@ async function storeCommandTriple(device, command, timestamp) {
   const rdf = `
 INSERT DATA {
   GRAPH <http://example.org/dt> {
-    <http://example.org/${device}/command/${timestamp}>
-      <http://example.org/hasCommand>   "${command}" ;
-      <http://example.org/hasTimestamp> "${timestamp}" .
+
+    <http://example.org/command/${device}/${timestamp}>
+      a <https://saref.etsi.org/core/Command> ;
+      <https://saref.etsi.org/core/actsUpon>
+        <urn:device:home:${device}> ;
+      <https://saref.etsi.org/core/hasCommandKind>
+        "${command}" ;
+      <http://purl.org/dc/terms/issued>
+        "${timestamp}" .
   }
 }`;
+
+
   await axios.post(
     'http://localhost:7200/repositories/smart-home/statements',
     rdf,
@@ -103,7 +111,7 @@ function sendCommand(device, command) {
   const message = {
     "@context": { "saref": "https://saref.etsi.org/core/" },
     "@type": "saref:Command",
-    "saref:actsUpon": device,
+    "saref:actsUpon": {"@id": `urn:device:home:${device}`},
     "saref:hasCommandKind": command   // home-app.js reads this field
   };
 
@@ -115,6 +123,7 @@ function sendCommand(device, command) {
 
     const timestamp = new Date().toISOString();
     console.log(`[DT COMMAND] ${device.toUpperCase()} <- ${command} @ ${timestamp}`);
+    console.log(message); 
 
     storeCommandTriple(device, command, timestamp).catch(err =>
       console.error('[GraphDB] Command store failed:', err.message)
@@ -127,6 +136,7 @@ function sendCommand(device, command) {
 function extractState(payload) {
   return payload?.["saref:hasState"]?.["@value"] || null;
 }
+
 
 // ── MQTT client ───────────────────────────────────────────────────────────────
 
@@ -181,6 +191,8 @@ mqttClient.on('message', (topic, payload) => {
     console.error('[DT] Error processing message:', err.message);
   }
 });
+
+
 
 // ── Socket.io ─────────────────────────────────────────────────────────────────
 

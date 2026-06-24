@@ -212,6 +212,7 @@ import random
 import os
 from datetime import datetime
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment variables from .env file
 load_dotenv()
@@ -252,7 +253,7 @@ latest_gps_data = None
 mqtt_data_lock  = threading.Lock()
 
 #  SAREF message builder 
-
+''' 
 def create_saref_message(gps_data, temperature):
     """Build a JSON-LD message following the ETSI SAREF ontology."""
     timestamp = datetime.now().isoformat()
@@ -264,7 +265,8 @@ def create_saref_message(gps_data, temperature):
             "saref":    "https://saref.etsi.org/core/",
             "geo":      "http://www.w3.org/2003/01/geo/wgs84_pos#",
             "xsd":      "http://www.w3.org/2001/XMLSchema#",
-            "dcterms":  "http://purl.org/dc/terms/"
+            "dcterms":  "http://purl.org/dc/terms/",
+            "rdfs":     "http://www.w3.org/2000/01/rdf-schema#"
         },
         "@id":   f"urn:message:location:car:{timestamp}",
         "@type": "saref:Message",
@@ -301,6 +303,73 @@ def create_saref_message(gps_data, temperature):
             { "@id": "urn:device:home:smart-barbecue",  "@type": "saref:Device", "rdfs:label": "Smart Barbecue" }
         ]
     }
+''' 
+
+
+def create_saref_message(gps_data, temperature):
+    """Build a JSON-LD message following a SAREF-aligned structure."""
+    timestamp = datetime.now().isoformat()
+
+    car_lat = float(gps_data.get("latitude", 0))
+    car_lon = float(gps_data.get("longitude", 0))
+
+    return {
+        "@context": {
+            "saref": "https://saref.etsi.org/core/",
+            "geo": "http://www.w3.org/2003/01/geo/wgs84_pos#",
+            "xsd": "http://www.w3.org/2001/XMLSchema#",
+            "dcterms": "http://purl.org/dc/terms/",
+            "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
+        },
+
+        "@id": f"urn:message:location:car:{timestamp}",
+        "@type": "ex:Message",
+        "dcterms:issued": timestamp,
+
+        "saref:hasMeasurement": [
+
+            # LOCATION
+            {
+                "@id": f"urn:measurement:location:car:{timestamp}",
+                "@type": "saref:Measurement",
+                "dcterms:created": timestamp,
+                "saref:relatesToProperty": {
+                    "@type": "geo:Point",
+                    "geo:lat": car_lat,
+                    "geo:long": car_lon
+                }
+            },
+
+            # TEMPERATURE
+            {
+                "@id": f"urn:measurement:temperature:car:{timestamp}",
+                "@type": "saref:Measurement",
+                "dcterms:created": timestamp,
+                "saref:relatesToProperty": {
+                    "@type": "saref:Temperature"
+                },
+                "saref:hasValue": {
+                    "@type": "xsd:float",
+                    "@value": temperature
+                },
+                "saref:hasUnit": "saref:Celsius"
+            }
+        ],
+
+        "ex:forDevice": {
+            "@id": "urn:device:car:gps-tracker",
+            "@type": "saref:Device",
+            "rdfs:label": "Car GPS Tracker",
+            "dcterms:identifier": "HTIT_51"
+        },
+
+        "ex:targetDevice": [
+            {"@id": "urn:device:home:smart-tv", "@type": "saref:Device", "rdfs:label": "Smart TV"},
+            {"@id": "urn:device:home:smart-hvac", "@type": "saref:Device", "rdfs:label": "Smart HVAC"},
+            {"@id": "urn:device:home:smart-barbecue", "@type": "saref:Device", "rdfs:label": "Smart Barbecue"}
+        ]
+    }
+
 
 #  Local Mosquitto publisher 
 
@@ -349,7 +418,8 @@ def publish_saref_messages():
 
             if result.rc == 0:
                 print(f"\n[PUBLISHER] SAREF message published to {LOCAL_MQTT_TOPIC}")
-                print(f"  lat: {gps_snapshot.get('latitude')}  lon: {gps_snapshot.get('longitude')}  temp: {temperature}°C")
+                print(json.dumps(saref_msg, indent=2))
+                #print(f"  lat: {gps_snapshot.get('latitude')}  lon: {gps_snapshot.get('longitude')}  temp: {temperature}°C")
             else:
                 print(f"[PUBLISHER] Publish failed (rc={result.rc})")
         else:
