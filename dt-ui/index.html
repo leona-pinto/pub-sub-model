@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Digital Twin — Control Center</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0e0e10;
+      --bg2:      #18181c;
+      --bg3:      #222228;
+      --border:   rgba(255,255,255,0.08);
+      --border2:  rgba(255,255,255,0.14);
+      --text:     #e8e8ea;
+      --muted:    #7a7a82;
+      --dim:      #4a4a52;
+      --green:    #3ddc84;
+      --green-bg: rgba(61,220,132,0.10);
+      --red:      #ff5c5c;
+      --red-bg:   rgba(255,92,92,0.10);
+      --amber:    #f5a623;
+      --mono:     'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+    }
+
+    body {
+      font-family: var(--mono);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 28px;
+      padding-bottom: 16px;
+      border-bottom: 0.5px solid var(--border);
+    }
+
+    .topbar-left { display: flex; align-items: center; gap: 12px; }
+
+    .sys-id {
+      font-size: 13px;
+      letter-spacing: 0.15em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .badge-live {
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      background: var(--green-bg);
+      color: var(--green);
+      border: 0.5px solid rgba(61,220,132,0.3);
+      border-radius: 4px;
+      padding: 3px 9px;
+    }
+
+    .clock { font-size: 12px; color: var(--dim); }
+
+    .section-label {
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      color: var(--dim);
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    /* Device cards */
+    .device-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+
+    .device-card {
+      background: var(--bg2);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+
+    .device-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--border2);
+      transition: background 0.2s;
+    }
+
+    .device-card.active { border-color: rgba(61,220,132,0.3); }
+    .device-card.active::before { background: var(--green); }
+
+    .device-name {
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      color: var(--muted);
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 10px;
+    }
+
+    .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--dim);
+      flex-shrink: 0;
+      transition: background 0.2s;
+    }
+    .dot.on { background: var(--green); }
+
+    .state-value {
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 4px;
+      transition: color 0.2s;
+    }
+    .state-value.on { color: var(--green); }
+
+    .state-sub {
+      font-size: 10px;
+      color: var(--dim);
+    }
+
+    .last-seen {
+      font-size: 10px;
+      color: var(--dim);
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 0.5px solid var(--border);
+    }
+
+    /* Command panel */
+    .cmd-panel {
+      background: var(--bg2);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      padding: 4px 0;
+      margin-bottom: 24px;
+    }
+
+    .cmd-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      border-bottom: 0.5px solid var(--border);
+    }
+    .cmd-row:last-child { border-bottom: none; }
+
+    .cmd-device {
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      color: var(--muted);
+      text-transform: uppercase;
+      width: 44px;
+      flex-shrink: 0;
+    }
+
+    .cmd-btns { display: flex; gap: 6px; }
+
+    .cmd-btn {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      padding: 5px 13px;
+      border-radius: 5px;
+      border: 0.5px solid var(--border2);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.1s;
+    }
+    .cmd-btn:hover.on-btn  { background: var(--green-bg); color: var(--green); border-color: rgba(61,220,132,0.4); }
+    .cmd-btn:hover.off-btn { background: var(--red-bg);   color: var(--red);   border-color: rgba(255,92,92,0.4); }
+    .cmd-btn:active { transform: scale(0.96); }
+
+    .cmd-status {
+      font-size: 10px;
+      color: var(--dim);
+      margin-left: auto;
+    }
+
+    /* Log */
+    .log-panel {
+      background: var(--bg2);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+    }
+
+    .log-inner {
+      max-height: 140px;
+      overflow-y: auto;
+    }
+
+    .log-line {
+      font-size: 11px;
+      color: var(--muted);
+      padding: 2px 0;
+      line-height: 1.7;
+    }
+
+    .log-time { color: var(--dim); margin-right: 8px; }
+    .log-tag  { margin-right: 6px; }
+    .log-line.cmd   .log-tag { color: var(--amber); }
+    .log-line.state .log-tag { color: var(--green); }
+    .log-line.err   .log-tag { color: var(--red); }
+  </style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="sys-id">Digital Twin &mdash; Control Center</span>
+      <span class="badge-live">LIVE</span>
+    </div>
+    <span class="clock" id="clock">--:--:--</span>
+  </div>
+
+  <p class="section-label">Device states</p>
+  <div class="device-grid">
+    <div class="device-card" id="card-tv">
+      <div class="device-name"><span class="dot" id="dot-tv"></span>TV</div>
+      <div class="state-value" id="val-tv">--</div>
+      <div class="state-sub" id="sub-tv">awaiting sync</div>
+      <div class="last-seen" id="seen-tv">last update: --</div>
+    </div>
+    <div class="device-card" id="card-hvac">
+      <div class="device-name"><span class="dot" id="dot-hvac"></span>HVAC</div>
+      <div class="state-value" id="val-hvac">--</div>
+      <div class="state-sub" id="sub-hvac">awaiting sync</div>
+      <div class="last-seen" id="seen-hvac">last update: --</div>
+    </div>
+    <div class="device-card" id="card-bbq">
+      <div class="device-name"><span class="dot" id="dot-bbq"></span>BBQ</div>
+      <div class="state-value" id="val-bbq">--</div>
+      <div class="state-sub" id="sub-bbq">awaiting sync</div>
+      <div class="last-seen" id="seen-bbq">last update: --</div>
+    </div>
+  </div>
+
+  <p class="section-label">Command interface</p>
+  <div class="cmd-panel">
+    <div class="cmd-row">
+      <span class="cmd-device">TV</span>
+      <div class="cmd-btns">
+        <button class="cmd-btn on-btn"  onclick="sendCommand('tv','TurnOn')">TURN_ON</button>
+        <button class="cmd-btn off-btn" onclick="sendCommand('tv','TurnOff')">TURN_OFF</button>
+      </div>
+      <span class="cmd-status" id="cmdstat-tv"></span>
+    </div>
+    <div class="cmd-row">
+      <span class="cmd-device">HVAC</span>
+      <div class="cmd-btns">
+        <button class="cmd-btn on-btn"  onclick="sendCommand('hvac','TURN_ON')">TURN_ON</button>
+        <button class="cmd-btn off-btn" onclick="sendCommand('hvac','TURN_OFF')">TURN_OFF</button>
+      </div>
+      <span class="cmd-status" id="cmdstat-hvac"></span>
+    </div>
+    <div class="cmd-row">
+      <span class="cmd-device">BBQ</span>
+      <div class="cmd-btns">
+        <button class="cmd-btn on-btn"  onclick="sendCommand('bbq','TurnOn')">TURN_ON</button>
+        <button class="cmd-btn off-btn" onclick="sendCommand('bbq','TurnOff')">TURN_OFF</button>
+      </div>
+      <span class="cmd-status" id="cmdstat-bbq"></span>
+    </div>
+  </div>
+
+  <p class="section-label">Event log</p>
+  <div class="log-panel">
+    <div class="log-inner" id="log"></div>
+  </div>
+
+  <script>
+    function ts() {
+      return new Date().toLocaleTimeString('en-GB', { hour12: false });
+    }
+
+    function addLog(type, tag, msg) {
+      const log = document.getElementById('log');
+      const line = document.createElement('div');
+      line.className = 'log-line ' + type;
+      line.innerHTML = `<span class="log-time">${ts()}</span><span class="log-tag">[${tag}]</span>${msg}`;
+      log.prepend(line);
+      while (log.children.length > 60) log.removeChild(log.lastChild);
+    }
+
+    function setDevice(device, state, timestamp) {
+      const val  = document.getElementById('val-'  + device);
+      const sub  = document.getElementById('sub-'  + device);
+      const dot  = document.getElementById('dot-'  + device);
+      const card = document.getElementById('card-' + device);
+      const seen = document.getElementById('seen-' + device);
+
+      const isOn = state && state !== 'OFF';
+
+      val.textContent  = state || '--';
+      val.className    = 'state-value' + (isOn ? ' on' : '');
+      dot.className    = 'dot' + (isOn ? ' on' : '');
+      card.className   = 'device-card' + (isOn ? ' active' : '');
+
+      if (device === 'hvac' && state) {
+        sub.textContent = state === 'COOLING' ? 'mode: cooling'
+                        : state === 'HEATING' ? 'mode: heating'
+                        : 'mode: standby';
+      } else {
+        sub.textContent = isOn ? 'powered on' : 'powered off';
+      }
+
+      if (timestamp) {
+        seen.textContent = 'last update: ' +
+          new Date(timestamp).toLocaleTimeString('en-GB', { hour12: false });
+      }
+    }
+
+    function sendCommand(device, command) {
+      const stat = document.getElementById('cmdstat-' + device);
+      stat.textContent = 'sending...';
+
+      fetch('/api/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device, command })
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) {
+          stat.textContent = 'sent ' + ts();
+          addLog('cmd', 'CMD', `${device.toUpperCase()} &larr; ${command}`);
+        } else {
+          stat.textContent = 'failed';
+          addLog('err', 'ERR', `${device.toUpperCase()} command rejected`);
+        }
+      })
+      .catch(() => {
+        stat.textContent = 'error';
+        addLog('err', 'ERR', `${device.toUpperCase()} unreachable`);
+      });
+    }
+
+    const socket = io();
+
+    socket.on('connect',    () => addLog('state', 'SYS', 'socket connected'));
+    socket.on('disconnect', () => addLog('err',   'SYS', 'socket lost &mdash; reconnecting'));
+
+    socket.on('device-state-update', (data) => {
+      const ls = data.latestState;
+      if (!ls) return;
+      ['tv', 'hvac', 'bbq'].forEach(d => {
+        if (ls[d]) {
+          setDevice(d, ls[d].state, ls[d].timestamp);
+          addLog('state', d.toUpperCase(), `state &rarr; ${ls[d].state}`);
+        }
+      });
+    });
+
+    setInterval(() => {
+      document.getElementById('clock').textContent = ts();
+    }, 1000);
+
+    addLog('state', 'SYS', 'dashboard initialised');
+  </script>
+</body>
+</html>

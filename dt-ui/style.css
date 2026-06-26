@@ -1,0 +1,28 @@
+body {
+  font-family: Arial;
+  background: #c0bebe;
+  color: white;
+  text-align: center;
+}
+
+.grid {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+}
+
+.card {
+  background: #999494;
+  padding: 20px;
+  border-radius: 10px;
+  width: 200px;
+}
+
+.card-button{
+  width: 400px; 
+
+}
+
+.button{
+  width: 400px; 
+}
