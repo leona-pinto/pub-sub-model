@@ -1,0 +1,7 @@
+Scalability: The publishers simultaeneously send messages so there is a sudden burst of messages that all the device consumers have to process quickly. As a result, the UI suddenly changes/updates or even lags sometimes. Message ordering also is an issue, and some of the devices may not accurately be reading the correct temp or gps location and updating it incorrectly due to the conflicting updates that occur simultaeneously.
+
+Flexibility: For adding a new subscriber and device it's easy because it's modular and there are config files. But changing to a different pub/sub broker or different ontology from SAREF is difficult.
+
+Simplicity: With the config files and same data being used by subscribers, there are 50 fewer lines of code that need to be changed or updated and makes it easier to debug. With a config file, it's easier to add topics and the messages that would be published in these topics. The more modular and less detailed code was simpler to maintain.
+
+Reliability would be the most difficult to achieve, as there would need to be fallbacks if the subscriber/consumer crashes. Also, if a device is more flexible it will become less reliable as there can be moe areas of failure to account for. If the consumer crashes without saving the offset of last processed message, it will not know which one to process next.

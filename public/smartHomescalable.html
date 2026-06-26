@@ -3,17 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart Home Dashboard</title>
+  <title>Smart Home Dashboard - Scaling Test</title>
   <link rel="stylesheet" href="css/smartHome-style.css">
   <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
   <div class="container">
     <header>
-      <h1>Smart Home Dashboard</h1>
+      <h1>Smart Home Dashboard - 8 Devices</h1>
     </header>
 
     <div class="content-grid">
+      <!-- Car Location Card -->
       <section class="card location-card">
         <h2>Car Location</h2>
         <div class="data-grid">
@@ -69,9 +70,49 @@
           <div class="status-text" id="barbecue-text">OFF</div>
         </div>
       </section>
+
+      <!-- Fan Card -->
+      <section class="card fan-card">
+        <h2>Fan</h2>
+        <div class="status-display" id="fan-status">
+          <div class="status-text" id="fan-text">OFF</div>
+        </div>
+      </section>
+
+      <!-- Air Purifier Card -->
+      <section class="card air-purifier-card">
+        <h2>Air Purifier</h2>
+        <div class="status-display" id="air-purifier-status">
+          <div class="status-text" id="air-purifier-text">OFF</div>
+        </div>
+      </section>
+
+      <!-- Dryer Card -->
+      <section class="card dryer-card">
+        <h2>Dryer</h2>
+        <div class="status-display" id="dryer-status">
+          <div class="status-text" id="dryer-text">OFF</div>
+        </div>
+      </section>
+
+      <!-- Oven Card -->
+      <section class="card oven-card">
+        <h2>Oven</h2>
+        <div class="status-display" id="oven-status">
+          <div class="status-text" id="oven-text">OFF</div>
+        </div>
+      </section>
+
+      <!-- Washing Machine Card -->
+      <section class="card washing-machine-card">
+        <h2>Washing Machine</h2>
+        <div class="status-display" id="washing-machine-status">
+          <div class="status-text" id="washing-machine-text">OFF</div>
+        </div>
+      </section>
     </div>
   </div>
 
-  <script src="js/smartHome-app.js"></script>
+  <script src="js/smartHome-app-scalable.js"></script>
 </body>
 </html>

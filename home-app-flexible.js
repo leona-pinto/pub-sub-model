@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const { Kafka } = require('kafkajs');
 const http = require('http');
@@ -9,6 +11,9 @@ const { DataFactory, Writer } = N3;
 const namedNode = DataFactory.namedNode;
 const literal = DataFactory.literal;
 
+const graphQueue = [];
+let graphProcessing = false;
+
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
@@ -16,13 +21,14 @@ const io = socketIo(server, {
 });
 
 // Configuration
-const KAFKA_BROKER = 'localhost:9092';
-const KAFKA_TOPIC = 'trackers.HTIT_51.gps';
+const KAFKA_BROKER = process.env.KAFKA_BROKER || 'localhost:9092';
+const KAFKA_TOPIC = process.env.KAFKA_TOPIC || 'trackers.HTIT_51.gps';
 
 // Consumer Groups for Each Device
 const HVAC_CONSUMER_GROUP = 'hvac-subscriber-group';
 const TV_CONSUMER_GROUP = 'tv-subscriber-group';
 const BARBECUE_CONSUMER_GROUP = 'barbecue-subscriber-group';
+const LIGHTS_CONSUMER_GROUP = 'lights-subscriber-group';
 
 // GraphDB 
 const GRAPHDB_ENDPOINT =
@@ -33,10 +39,12 @@ const SAREF = "https://saref.etsi.org/core/";
 const GEO = "http://www.w3.org/2003/01/geo/wgs84_pos#";
 const RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const DCT = "http://purl.org/dc/terms/";
+const LIGHTS = "http://example.org/lights/";
 
 const GRAPH_HVAC = "http://example.org/graph/hvac";
 const GRAPH_TV = "http://example.org/graph/tv";
 const GRAPH_BBQ = "http://example.org/graph/barbecue";
+const GRAPH_LIGHTS = "http://example.org/graph/lights";
 
 
 
@@ -48,6 +56,7 @@ const HOUSE_LON = 6.8904;
 const HVAC_THRESHOLD_KM = 3;
 const TV_THRESHOLD_KM = 2;
 const BARBECUE_THRESHOLD_KM = 2;
+const LIGHTS_THRESHOLD_KM = 2.5;
 
 // GraphDB throttling 
 const GRAPHDB_INTERVAL_MS = 2000; // 2 seconds per device
@@ -55,7 +64,8 @@ const GRAPHDB_INTERVAL_MS = 2000; // 2 seconds per device
 let lastGraphWrite = {
   hvac: 0,
   tv: 0,
-  barbecue: 0
+  barbecue: 0,
+  lights: 0
 };
 
 // Global Device State
@@ -76,6 +86,9 @@ let deviceState = {
     },
     barbecue: {
       isPowerOn: true // Default to ON
+    },
+    lights: {
+      isPowerOn: false
     }
   }
 };
@@ -90,12 +103,13 @@ const kafka = new Kafka({
 const hvacConsumer = kafka.consumer({ groupId: HVAC_CONSUMER_GROUP });
 const tvConsumer = kafka.consumer({ groupId: TV_CONSUMER_GROUP });
 const barbecueConsumer = kafka.consumer({ groupId: BARBECUE_CONSUMER_GROUP });
+const lightsConsumer = kafka.consumer({ groupId: LIGHTS_CONSUMER_GROUP });
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'smartHome.html'));
+  res.sendFile(path.join(__dirname, 'public', 'smartHome-flexible.html'));
 });
 
 // Calculate distance between two GPS coordinates using Haversine formula
@@ -168,7 +182,8 @@ async function storeInGraphDB(
       saref: SAREF,
       geo: GEO,
       rdf: RDF,
-      dcterms: DCT
+      dcterms: DCT,
+      lights: LIGHTS
     }
   });
 
@@ -253,7 +268,6 @@ async function storeInGraphDB(
     graphNode
   );
 
-  
   writer.end(async (error, result) => {
 
     if (error) {
@@ -286,21 +300,7 @@ async function storeInGraphDB(
   });
 }
 
-// Non-blocking GraphDB write (fires in background, doesn't delay UI)
-function writeToGraphDBAsync(deviceName, deviceState, temperature, distance, graphIRI) {
-  const now = Date.now();
-
-  // Check throttle (1 second per device)
-  if (now - lastGraphWrite[deviceName] < 1000) {
-    return; // Skip write if throttled
-  }
-
-  lastGraphWrite[deviceName] = now;
-
-  // Fire off without awaiting - UI updates immediately
-  storeInGraphDB(deviceName, deviceState, temperature, distance, graphIRI)
-    .catch(err => console.error(`Background GraphDB write failed for ${deviceName}:`, err.message));
-}
+   
 
 // HVAC Subscriber Logic
 async function startHvacSubscriber() {
@@ -332,8 +332,15 @@ async function startHvacSubscriber() {
             deviceState.devices.hvac.isPowerOn = false;
             deviceState.devices.hvac.mode = 'OFF';
           }
-
-          writeToGraphDBAsync("hvac", deviceState.devices.hvac, temperature, distance, GRAPH_HVAC);
+          const now = Date.now();
+            graphQueue.push({
+              deviceName: "hvac",
+              state: deviceState.devices.hvac,
+              temperature,
+              distance,
+              graphIRI: GRAPH_HVAC
+            });
+            processGraphQueue();
 
           console.log(`[HVAC] Distance: ${distance.toFixed(2)} km | Power: ${deviceState.devices.hvac.isPowerOn ? 'ON' : 'OFF'} (${deviceState.devices.hvac.mode}) | Temp: ${temperature.toFixed(2)}°C`);
 
@@ -374,8 +381,16 @@ async function startTvSubscriber() {
           } else {
             deviceState.devices.tv.isPowerOn = false;
           }
+         
 
-          writeToGraphDBAsync("tv", deviceState.devices.tv, temperature, distance, GRAPH_TV);
+                graphQueue.push({
+        deviceName: "tv",
+        state: deviceState.devices.tv,
+        temperature,
+        distance,
+        graphIRI: GRAPH_TV
+      });
+      processGraphQueue();
 
           console.log(`[TV] Distance: ${distance.toFixed(2)} km | Power: ${deviceState.devices.tv.isPowerOn ? 'ON' : 'OFF'} | Temp: ${temperature.toFixed(2)}°C`);
 
@@ -416,8 +431,15 @@ async function startBarbecueSubscriber() {
           } else {
             deviceState.devices.barbecue.isPowerOn = true;
           }
-
-          writeToGraphDBAsync("barbecue", deviceState.devices.barbecue, temperature, distance, GRAPH_BBQ);
+    
+                  graphQueue.push({
+          deviceName: "barbecue",
+          state: deviceState.devices.barbecue,
+          temperature,
+          distance,
+          graphIRI: GRAPH_BBQ
+        });
+        processGraphQueue();
 
           console.log(`[BARBECUE] Distance: ${distance.toFixed(2)} km | Power: ${deviceState.devices.barbecue.isPowerOn ? 'ON' : 'OFF'} | Temp: ${temperature.toFixed(2)}°C`);
 
@@ -432,6 +454,77 @@ async function startBarbecueSubscriber() {
       }
     }
   });
+}
+
+// Smart Lights Subscriber Logic
+async function startLightsSubscriber() {
+  await lightsConsumer.connect();
+  console.log('[LIGHTS] Kafka consumer connected');
+
+  await lightsConsumer.subscribe({ topic: KAFKA_TOPIC, fromBeginning: false });
+  console.log('[LIGHTS] Subscribed to Kafka topic');
+
+  await lightsConsumer.run({
+    eachMessage: async ({ topic, partition, message }) => {
+      try {
+        const sarefMsg = JSON.parse(message.value.toString());
+        const { distance, temperature, latitude, longitude } = extractDataFromSarefMessage(sarefMsg);
+
+        if (distance !== null && temperature !== null) {
+          updateLocationData(distance, temperature, latitude, longitude);
+
+          const previousState = deviceState.devices.lights.isPowerOn;
+
+          if (distance <= LIGHTS_THRESHOLD_KM) {
+            deviceState.devices.lights.isPowerOn = true;
+          } else {
+            deviceState.devices.lights.isPowerOn = false;
+          }
+
+          writeToGraphDBAsync("lights", deviceState.devices.lights, temperature, distance, GRAPH_LIGHTS);
+
+          console.log(`[LIGHTS] Distance: ${distance.toFixed(2)} km | Power: ${deviceState.devices.lights.isPowerOn ? 'ON' : 'OFF'} | Temp: ${temperature.toFixed(2)}°C`);
+
+          if (previousState !== deviceState.devices.lights.isPowerOn) {
+            console.log(`[LIGHTS] State changed!\n`);
+          }
+
+          io.emit('device-state-update', deviceState);
+        }
+      } catch (err) {
+        console.error('[LIGHTS] Error processing message:', err.message);
+      }
+    }
+  });
+}
+
+// throttling of rest calls to graphDB
+async function processGraphQueue() {
+  if (graphProcessing) return;
+
+  graphProcessing = true;
+
+  while (graphQueue.length > 0) {
+    const job = graphQueue.shift();
+
+    try {
+      await storeInGraphDB(
+        job.deviceName,
+        job.state,
+        job.temperature,
+        job.distance,
+        job.graphIRI
+      );
+
+      // throttle between writes
+      await new Promise(r => setTimeout(r, 1000));
+
+    } catch (err) {
+      console.error("GraphDB queue error:", err.message);
+    }
+  }
+
+  graphProcessing = false;
 }
 
 // Socket.io events
@@ -456,13 +549,15 @@ server.listen(PORT, () => {
   console.log(`Device Thresholds:`);
   console.log(`  HVAC: ${HVAC_THRESHOLD_KM} km (separate consumer group)`);
   console.log(`  Smart TV: ${TV_THRESHOLD_KM} km (separate consumer group)`);
-  console.log(`  Barbecue: ${BARBECUE_THRESHOLD_KM} km (separate consumer group)\n`);
+  console.log(`  Barbecue: ${BARBECUE_THRESHOLD_KM} km (separate consumer group)`);
+  console.log(`  Lights: ${LIGHTS_THRESHOLD_KM} km (separate consumer group)\n`);
 
   console.log(`Starting subscribers...\n`);
 
   startHvacSubscriber().catch(err => console.error('HVAC subscriber error:', err));
   startTvSubscriber().catch(err => console.error('TV subscriber error:', err));
   startBarbecueSubscriber().catch(err => console.error('Barbecue subscriber error:', err));
+  startLightsSubscriber().catch(err => console.error('Lights subscriber error:', err));
 });
 
 process.on('SIGINT', () => {
@@ -470,7 +565,8 @@ process.on('SIGINT', () => {
   Promise.all([
     hvacConsumer.disconnect(),
     tvConsumer.disconnect(),
-    barbecueConsumer.disconnect()
+    barbecueConsumer.disconnect(),
+    lightsConsumer.disconnect()
   ]).then(() => {
     server.close();
     process.exit(0);

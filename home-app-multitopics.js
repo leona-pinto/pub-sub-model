@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const { Kafka } = require('kafkajs');
 const http = require('http');
@@ -16,13 +18,14 @@ const io = socketIo(server, {
 });
 
 // Configuration
-const KAFKA_BROKER = 'localhost:9092';
-const KAFKA_TOPIC = 'trackers.HTIT_51.gps';
+const KAFKA_BROKER = process.env.KAFKA_BROKER ;
+// const KAFKA_TOPIC = process.env.KAFKA_TOPIC ;
 
-// Consumer Groups for Each Device
-const HVAC_CONSUMER_GROUP = 'hvac-subscriber-group';
-const TV_CONSUMER_GROUP = 'tv-subscriber-group';
-const BARBECUE_CONSUMER_GROUP = 'barbecue-subscriber-group';
+// Multiple topics configuration
+const KAFKA_TOPIC_1 = process.env.KAFKA_TOPIC ;
+const KAFKA_TOPIC_2 = process.env.KAFKA_TOPIC_2 ;
+const KAFKA_TOPIC_3 = process.env.KAFKA_TOPIC_3;
+
 
 // GraphDB 
 const GRAPHDB_ENDPOINT =
@@ -86,10 +89,10 @@ const kafka = new Kafka({
   brokers: [KAFKA_BROKER]
 });
 
-// Create separate consumers for each device
-const hvacConsumer = kafka.consumer({ groupId: HVAC_CONSUMER_GROUP });
-const tvConsumer = kafka.consumer({ groupId: TV_CONSUMER_GROUP });
-const barbecueConsumer = kafka.consumer({ groupId: BARBECUE_CONSUMER_GROUP });
+// Create separate consumers for each topic (multi-topic setup)
+const topic1Consumer = kafka.consumer({ groupId: 'topic1-consumer-group' });
+const topic2Consumer = kafka.consumer({ groupId: 'topic2-consumer-group' });
+const topic3Consumer = kafka.consumer({ groupId: 'topic3-consumer-group' });
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
@@ -286,31 +289,17 @@ async function storeInGraphDB(
   });
 }
 
-// Non-blocking GraphDB write (fires in background, doesn't delay UI)
-function writeToGraphDBAsync(deviceName, deviceState, temperature, distance, graphIRI) {
-  const now = Date.now();
+   
 
-  // Check throttle (1 second per device)
-  if (now - lastGraphWrite[deviceName] < 1000) {
-    return; // Skip write if throttled
-  }
+// Multi-Topic Subscriber 1 (Topic 1)
+async function startTopic1Subscriber() {
+  await topic1Consumer.connect();
+  console.log('[TOPIC-1] Kafka consumer connected');
 
-  lastGraphWrite[deviceName] = now;
+  await topic1Consumer.subscribe({ topic: KAFKA_TOPIC_1, fromBeginning: false });
+  console.log(`[TOPIC-1] Subscribed to Kafka topic: ${KAFKA_TOPIC_1}`);
 
-  // Fire off without awaiting - UI updates immediately
-  storeInGraphDB(deviceName, deviceState, temperature, distance, graphIRI)
-    .catch(err => console.error(`Background GraphDB write failed for ${deviceName}:`, err.message));
-}
-
-// HVAC Subscriber Logic
-async function startHvacSubscriber() {
-  await hvacConsumer.connect();
-  console.log('[HVAC] Kafka consumer connected');
-
-  await hvacConsumer.subscribe({ topic: KAFKA_TOPIC, fromBeginning: false });
-  console.log('[HVAC] Subscribed to Kafka topic');
-
-  await hvacConsumer.run({
+  await topic1Consumer.run({
     eachMessage: async ({ topic, partition, message }) => {
       try {
         const sarefMsg = JSON.parse(message.value.toString());
@@ -319,46 +308,25 @@ async function startHvacSubscriber() {
         if (distance !== null && temperature !== null) {
           updateLocationData(distance, temperature, latitude, longitude);
 
-          const previousState = deviceState.devices.hvac.isPowerOn;
-
-          if (distance <= HVAC_THRESHOLD_KM) {
-            deviceState.devices.hvac.isPowerOn = true;
-            if (temperature > 25) {
-              deviceState.devices.hvac.mode = 'COOLING';
-            } else {
-              deviceState.devices.hvac.mode = 'HEATING';
-            }
-          } else {
-            deviceState.devices.hvac.isPowerOn = false;
-            deviceState.devices.hvac.mode = 'OFF';
-          }
-
-          writeToGraphDBAsync("hvac", deviceState.devices.hvac, temperature, distance, GRAPH_HVAC);
-
-          console.log(`[HVAC] Distance: ${distance.toFixed(2)} km | Power: ${deviceState.devices.hvac.isPowerOn ? 'ON' : 'OFF'} (${deviceState.devices.hvac.mode}) | Temp: ${temperature.toFixed(2)}°C`);
-
-          if (previousState !== deviceState.devices.hvac.isPowerOn) {
-            console.log(`[HVAC] State changed!\n`);
-          }
-
+          console.log(`[TOPIC-1] Received from ${KAFKA_TOPIC_1} | Distance: ${distance.toFixed(2)} km | Temp: ${temperature.toFixed(2)}°C`);
           io.emit('device-state-update', deviceState);
         }
       } catch (err) {
-        console.error('[HVAC] Error processing message:', err.message);
+        console.error(`[TOPIC-1] Error processing message from ${KAFKA_TOPIC_1}:`, err.message);
       }
     }
   });
 }
 
-// Smart TV Subscriber Logic
-async function startTvSubscriber() {
-  await tvConsumer.connect();
-  console.log('[TV] Kafka consumer connected');
+// Multi-Topic Subscriber 2 (Topic 2)
+async function startTopic2Subscriber() {
+  await topic2Consumer.connect();
+  console.log('[TOPIC-2] Kafka consumer connected');
 
-  await tvConsumer.subscribe({ topic: KAFKA_TOPIC, fromBeginning: false });
-  console.log('[TV] Subscribed to Kafka topic');
+  await topic2Consumer.subscribe({ topic: KAFKA_TOPIC_2, fromBeginning: false });
+  console.log(`[TOPIC-2] Subscribed to Kafka topic: ${KAFKA_TOPIC_2}`);
 
-  await tvConsumer.run({
+  await topic2Consumer.run({
     eachMessage: async ({ topic, partition, message }) => {
       try {
         const sarefMsg = JSON.parse(message.value.toString());
@@ -367,40 +335,25 @@ async function startTvSubscriber() {
         if (distance !== null && temperature !== null) {
           updateLocationData(distance, temperature, latitude, longitude);
 
-          const previousState = deviceState.devices.tv.isPowerOn;
-
-          if (distance <= TV_THRESHOLD_KM) {
-            deviceState.devices.tv.isPowerOn = true;
-          } else {
-            deviceState.devices.tv.isPowerOn = false;
-          }
-
-          writeToGraphDBAsync("tv", deviceState.devices.tv, temperature, distance, GRAPH_TV);
-
-          console.log(`[TV] Distance: ${distance.toFixed(2)} km | Power: ${deviceState.devices.tv.isPowerOn ? 'ON' : 'OFF'} | Temp: ${temperature.toFixed(2)}°C`);
-
-          if (previousState !== deviceState.devices.tv.isPowerOn) {
-            console.log(`[TV] State changed!\n`);
-          }
-
+          console.log(`[TOPIC-2] Received from ${KAFKA_TOPIC_2} | Distance: ${distance.toFixed(2)} km | Temp: ${temperature.toFixed(2)}°C`);
           io.emit('device-state-update', deviceState);
         }
       } catch (err) {
-        console.error('[TV] Error processing message:', err.message);
+        console.error(`[TOPIC-2] Error processing message from ${KAFKA_TOPIC_2}:`, err.message);
       }
     }
   });
 }
 
-// Barbecue Subscriber Logic
-async function startBarbecueSubscriber() {
-  await barbecueConsumer.connect();
-  console.log('[BARBECUE] Kafka consumer connected');
+// Multi-Topic Subscriber 3 (Topic 3)
+async function startTopic3Subscriber() {
+  await topic3Consumer.connect();
+  console.log('[TOPIC-3] Kafka consumer connected');
 
-  await barbecueConsumer.subscribe({ topic: KAFKA_TOPIC, fromBeginning: false });
-  console.log('[BARBECUE] Subscribed to Kafka topic');
+  await topic3Consumer.subscribe({ topic: KAFKA_TOPIC_3, fromBeginning: false });
+  console.log(`[TOPIC-3] Subscribed to Kafka topic: ${KAFKA_TOPIC_3}`);
 
-  await barbecueConsumer.run({
+  await topic3Consumer.run({
     eachMessage: async ({ topic, partition, message }) => {
       try {
         const sarefMsg = JSON.parse(message.value.toString());
@@ -409,26 +362,11 @@ async function startBarbecueSubscriber() {
         if (distance !== null && temperature !== null) {
           updateLocationData(distance, temperature, latitude, longitude);
 
-          const previousState = deviceState.devices.barbecue.isPowerOn;
-
-          if (distance > BARBECUE_THRESHOLD_KM) {
-            deviceState.devices.barbecue.isPowerOn = false;
-          } else {
-            deviceState.devices.barbecue.isPowerOn = true;
-          }
-
-          writeToGraphDBAsync("barbecue", deviceState.devices.barbecue, temperature, distance, GRAPH_BBQ);
-
-          console.log(`[BARBECUE] Distance: ${distance.toFixed(2)} km | Power: ${deviceState.devices.barbecue.isPowerOn ? 'ON' : 'OFF'} | Temp: ${temperature.toFixed(2)}°C`);
-
-          if (previousState !== deviceState.devices.barbecue.isPowerOn) {
-            console.log(`[BARBECUE] State changed!\n`);
-          }
-
+          console.log(`[TOPIC-3] Received from ${KAFKA_TOPIC_3} | Distance: ${distance.toFixed(2)} km | Temp: ${temperature.toFixed(2)}°C`);
           io.emit('device-state-update', deviceState);
         }
       } catch (err) {
-        console.error('[BARBECUE] Error processing message:', err.message);
+        console.error(`[TOPIC-3] Error processing message from ${KAFKA_TOPIC_3}:`, err.message);
       }
     }
   });
@@ -460,17 +398,17 @@ server.listen(PORT, () => {
 
   console.log(`Starting subscribers...\n`);
 
-  startHvacSubscriber().catch(err => console.error('HVAC subscriber error:', err));
-  startTvSubscriber().catch(err => console.error('TV subscriber error:', err));
-  startBarbecueSubscriber().catch(err => console.error('Barbecue subscriber error:', err));
+  startTopic1Subscriber().catch(err => console.error('Topic 1 subscriber error:', err));
+  startTopic2Subscriber().catch(err => console.error('Topic 2 subscriber error:', err));
+  startTopic3Subscriber().catch(err => console.error('Topic 3 subscriber error:', err));
 });
 
 process.on('SIGINT', () => {
   console.log('\n\nShutting down all subscribers...');
   Promise.all([
-    hvacConsumer.disconnect(),
-    tvConsumer.disconnect(),
-    barbecueConsumer.disconnect()
+    topic1Consumer.disconnect(),
+    topic2Consumer.disconnect(),
+    topic3Consumer.disconnect()
   ]).then(() => {
     server.close();
     process.exit(0);

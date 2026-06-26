@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart Home Dashboard</title>
+  <title>Smart Home Dashboard - Flexible</title>
   <link rel="stylesheet" href="css/smartHome-style.css">
   <script src="/socket.io/socket.io.js"></script>
 </head>
@@ -14,6 +14,7 @@
     </header>
 
     <div class="content-grid">
+      <!-- Car Location Card -->
       <section class="card location-card">
         <h2>Car Location</h2>
         <div class="data-grid">
@@ -69,9 +70,17 @@
           <div class="status-text" id="barbecue-text">OFF</div>
         </div>
       </section>
+
+      <!-- Smart Lights Card (NEW) -->
+      <section class="card lights-card">
+        <h2>Smart Lights</h2>
+        <div class="status-display" id="lights-status">
+          <div class="status-text" id="lights-text">OFF</div>
+        </div>
+      </section>
     </div>
   </div>
 
-  <script src="js/smartHome-app.js"></script>
+  <script src="js/smartHome-app-flexible.js"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart Home Dashboard</title>
+  <title>Smart Home Dashboard - Modular</title>
   <link rel="stylesheet" href="css/smartHome-style.css">
   <script src="/socket.io/socket.io.js"></script>
 </head>
@@ -14,20 +14,21 @@
     </header>
 
     <div class="content-grid">
+      <!-- Car Location Card -->
       <section class="card location-card">
         <h2>Car Location</h2>
         <div class="data-grid">
           <div class="data-item">
             <label>Latitude:</label>
-            <span id="latitude" class="value">--</span>
+            <span id="latitude-modular" class="value">--</span>
           </div>
           <div class="data-item">
             <label>Longitude:</label>
-            <span id="longitude" class="value">--</span>
+            <span id="longitude-modular" class="value">--</span>
           </div>
           <div class="data-item">
             <label>Distance:</label>
-            <span id="distance" class="value"><strong id="distance-value">--</strong> km</span>
+            <span id="distance-modular" class="value"><strong id="distance-value-modular">--</strong> km</span>
           </div>
         </div>
       </section>
@@ -38,7 +39,7 @@
         <div class="data-grid">
           <div class="data-item">
             <label>Current Temp:</label>
-            <span id="temperature-value" class="value">-- °C</span>
+            <span id="temperature-value-modular" class="value">-- °C</span>
           </div>
         </div>
       </section>
@@ -46,32 +47,42 @@
       <!-- HVAC Card -->
       <section class="card hvac-card">
         <h2>HVAC</h2>
-        <div class="status-display" id="hvac-status">
-          <div class="status-text" id="hvac-text">OFF</div>
+        <div class="status-display" id="hvac-status-modular">
+          <div class="status-text" id="hvac-text-modular">OFF</div>
         </div>
-        <div class="hvac-mode" id="hvac-mode" style="display: none;">
-          <span id="hvac-mode-text">--</span>
+        <div class="hvac-mode" id="hvac-mode-modular" style="display: none;">
+          <span id="hvac-mode-text-modular">--</span>
         </div>
       </section>
 
       <!-- Smart TV Card -->
       <section class="card tv-card">
         <h2>Smart TV</h2>
-        <div class="status-display" id="tv-status">
-          <div class="status-text" id="tv-text">OFF</div>
+        <div class="status-display" id="tv-status-modular">
+          <div class="status-text" id="tv-text-modular">OFF</div>
         </div>
       </section>
 
       <!-- Barbecue Card -->
       <section class="card barbecue-card">
         <h2>Barbecue</h2>
-        <div class="status-display" id="barbecue-status">
-          <div class="status-text" id="barbecue-text">OFF</div>
+        <div class="status-display" id="barbecue-status-modular">
+          <div class="status-text" id="barbecue-text-modular">OFF</div>
+        </div>
+      </section>
+
+      <!-- Smart Lights Card -->
+      <section class="card lights-card">
+        <h2>Smart Lights</h2>
+        <div class="status-display" id="lights-status-modular">
+          <div class="status-text" id="lights-text-modular">OFF</div>
         </div>
       </section>
     </div>
   </div>
 
-  <script src="js/smartHome-app.js"></script>
+  <!-- Load config first, then app -->
+  <script src="js/smartHome-modular-config.js"></script>
+  <script src="js/smartHome-app-modular.js"></script>
 </body>
 </html>

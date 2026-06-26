@@ -6,7 +6,7 @@
 
 body {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
   color: #333;
   min-height: 100vh;
   padding: 20px;
@@ -46,7 +46,7 @@ header h1 {
 
 .content-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 20px;
 }
 
@@ -147,6 +147,48 @@ header h1 {
   animation: none;
 }
 
+/* Status Display States */
+.status-display.on {
+  background: #e8f5e9;
+  border-color: #4caf50;
+}
+
+.status-display.on .status-text {
+  color: #2e7d32;
+  font-weight: bold;
+}
+
+.status-display.off {
+  background: #f3e5f5;
+  border-color: #9c27b0;
+}
+
+.status-display.off .status-text {
+  color: #6a1b9a;
+  font-weight: bold;
+}
+
+/* HVAC Mode Display */
+.hvac-mode {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 15px;
+  padding: 15px;
+  border-radius: 8px;
+  font-size: 1.1em;
+  font-weight: bold;
+}
+
+.hvac-mode #hvac-mode-icon {
+  font-size: 2em;
+}
+
+.hvac-mode #hvac-mode-text {
+  font-size: 1.1em;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
@@ -171,6 +213,50 @@ header h1 {
 .status-display.off {
   background: #f5f5f5;
   border-color: #ccc;
+}
+
+/* Location and Temperature Cards */
+.location-card {
+  grid-column: span 1;
+}
+
+.temperature-card {
+  grid-column: span 1;
+}
+
+/* Device Cards */
+.hvac-card,
+.tv-card,
+.barbecue-card,
+.fan-card,
+.air-purifier-card,
+.dryer-card,
+.oven-card,
+.washing-machine-card {
+  grid-column: span 1;
+}
+
+/* Lights Card Specific Styling */
+.lights-card h2 {
+  color: #f59e0b;
+}
+
+.lights-card .status-display.on {
+  background: #fef3c7;
+  border-color: #f59e0b;
+}
+
+.lights-card .status-display.on .status-text {
+  color: #92400e;
+}
+
+.lights-card .status-display.off {
+  background: #f3e5f5;
+  border-color: #9c27b0;
+}
+
+.lights-card .status-display.off .status-text {
+  color: #6a1b9a;
 }
 
 /* Responsive */
