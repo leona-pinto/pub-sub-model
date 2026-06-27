@@ -1,7 +1,7 @@
 body {
   font-family: Arial;
   background: #c0bebe;
-  color: white;
+  color: rgb(217, 145, 145);
   text-align: center;
 }
 
@@ -12,7 +12,7 @@ body {
 }
 
 .card {
-  background: #999494;
+  background: #c6bdbd;
   padding: 20px;
   border-radius: 10px;
   width: 200px;
@@ -26,3 +26,4 @@ body {
 .button{
   width: 400px; 
 }
+
