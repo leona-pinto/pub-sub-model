@@ -8,13 +8,13 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:       #0e0e10;
-      --bg2:      #18181c;
+      --bg:       #a3a3ad;
+      --bg2:      #3d3d63;
       --border:   rgba(255,255,255,0.08);
       --border2:  rgba(255,255,255,0.14);
-      --text:     #e8e8ea;
-      --muted:    #7a7a82;
-      --dim:      #4a4a52;
+      --text:     #080808;
+      --muted:    #bdbdd1;
+      --dim:      #53535a;
       --green:    #3ddc84;
       --green-bg: rgba(61,220,132,0.10);
       --red:      #ff5c5c;
@@ -29,11 +29,11 @@
 
     .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; padding-bottom: 16px; border-bottom: 0.5px solid var(--border); }
     .topbar-left { display: flex; align-items: center; gap: 12px; }
-    .sys-id { font-size: 13px; letter-spacing: 0.15em; color: var(--muted); text-transform: uppercase; }
-    .badge-live { font-size: 10px; letter-spacing: 0.1em; background: var(--green-bg); color: var(--green); border: 0.5px solid rgba(61,220,132,0.3); border-radius: 4px; padding: 3px 9px; }
-    .clock { font-size: 12px; color: var(--dim); }
+    .sys-id { font-size: 20px; letter-spacing: 0.15em; color: var(--text); text-transform: uppercase; }
+    .badge-live { font-size: 15px; letter-spacing: 0.1em; background: var(--green-bg); color: var(--green); border: 0.5px solid rgba(61,220,132,0.3); border-radius: 4px; padding: 3px 9px; }
+    .clock { font-size: 15px; color: var(--text); }
 
-    .section-label { font-size: 10px; letter-spacing: 0.18em; color: var(--dim); text-transform: uppercase; margin-bottom: 10px; }
+    .section-label { font-size: 13px; letter-spacing: 0.18em; color: var(--dim); text-transform: uppercase; margin-bottom: 10px; }
 
     .device-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 24px; }
 
@@ -54,7 +54,7 @@
       100% { background: #ff5c5c; }
     }
 
-    .device-name { font-size: 10px; letter-spacing: 0.15em; color: var(--muted); text-transform: uppercase; display: flex; align-items: center; gap: 7px; margin-bottom: 10px; }
+    .device-name { font-size: 15px; letter-spacing: 0.15em; color: var(--muted); text-transform: uppercase; display: flex; align-items: center; gap: 7px; margin-bottom: 10px; }
     .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); flex-shrink: 0; transition: background 0.2s; }
     .dot.on { background: var(--green); }
     .dot.led { background: var(--purple); animation: rainbow-dot 2s linear infinite; }
@@ -62,18 +62,18 @@
       0%{background:#ff5c5c}17%{background:#f5a623}33%{background:#3ddc84}50%{background:#38bdf8}67%{background:#a78bfa}83%{background:#f472b6}100%{background:#ff5c5c}
     }
 
-    .state-value { font-size: 20px; font-weight: 600; color: var(--muted); margin-bottom: 4px; transition: color 0.2s; }
+    .state-value { font-size: 20px; font-weight: 600; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; transition: color 0.2s; }
     .state-value.on { color: var(--green); }
     .state-value.led-on { color: var(--purple); }
-    .state-sub { font-size: 10px; color: var(--dim); }
-    .last-seen { font-size: 10px; color: var(--dim); margin-top: 10px; padding-top: 10px; border-top: 0.5px solid var(--border); }
+    .state-sub { font-size: 14px; color: var(--muted); }
+    .last-seen { font-size: 14px; color: var(--muted); margin-top: 10px; padding-top: 10px; border-top: 0.5px solid var(--border); }
 
     .cmd-panel { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 10px; padding: 4px 0; margin-bottom: 24px; }
     .cmd-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 0.5px solid var(--border); }
     .cmd-row:last-child { border-bottom: none; }
-    .cmd-device { font-size: 10px; letter-spacing: 0.15em; color: var(--muted); text-transform: uppercase; width: 44px; flex-shrink: 0; }
+    .cmd-device { font-size: 14px; letter-spacing: 0.15em; color: var(--muted); text-transform: uppercase; width: 44px; flex-shrink: 0; }
     .cmd-btns { display: flex; gap: 6px; flex-wrap: wrap; }
-    .cmd-btn { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; padding: 5px 13px; border-radius: 5px; border: 0.5px solid var(--border2); background: transparent; color: var(--muted); cursor: pointer; transition: all 0.1s; }
+    .cmd-btn { font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em; padding: 5px 13px; border-radius: 5px; border: 0.5px solid var(--border2); background: transparent; color: var(--muted); cursor: pointer; transition: all 0.1s; }
     .cmd-btn:hover.on-btn  { background: var(--green-bg);  color: var(--green);  border-color: rgba(61,220,132,0.4); }
     .cmd-btn:hover.off-btn { background: var(--red-bg);    color: var(--red);    border-color: rgba(255,92,92,0.4); }
     .cmd-btn:hover.led-btn { background: var(--purple-bg); color: var(--purple); border-color: rgba(167,139,250,0.4); }
@@ -83,7 +83,7 @@
     .log-panel { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 10px; padding: 12px 16px; }
     .log-inner { max-height: 160px; overflow-y: auto; }
     .log-line { font-size: 11px; color: var(--muted); padding: 2px 0; line-height: 1.7; }
-    .log-time { color: var(--dim); margin-right: 8px; }
+    .log-time { color: var(--muted); margin-right: 8px; }
     .log-tag  { margin-right: 6px; }
     .log-line.cmd   .log-tag { color: var(--amber); }
     .log-line.state .log-tag { color: var(--green); }
@@ -92,9 +92,9 @@
 
     .sensor-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 24px; }
     .sensor-card { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 10px; padding: 14px 16px; }
-    .sensor-label { font-size: 10px; letter-spacing: 0.15em; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; }
-    .sensor-value { font-size: 18px; font-weight: 600; color: var(--text); font-family: var(--mono); }
-    .sensor-sub { font-size: 10px; color: var(--dim); margin-bottom: 8px; }
+    .sensor-label { font-size: 15px; letter-spacing: 0.15em; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; }
+    .sensor-value { font-size: 18px; font-weight: 600; color: var(--muted); font-family: var(--mono); }
+    .sensor-sub { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
   </style>
 </head>
 <body>
