@@ -99,7 +99,7 @@ python actuator_sim.py
 | `sensor/gps` | Publisher → Home app / DT | GPS + temperature (SAREF JSON-LD) |
 | `sensor/acceleration` | Publisher → Home app / DT | Acceleration X/Y/Z (SAREF JSON-LD) |
 | `sensor/humidity` | Publisher → Home app / DT | Soil humidity (SAREF JSON-LD) |
-| `home/hvac/state` | Home app → DT | HVAC state (OFF / HEATING / COOLING) |
+| `home/hvac/state` | Home app → DT | HVAC state (OFF / ON) |
 | `home/tv/state` | Home app → DT | TV state (ON / OFF) |
 | `home/bbq/state` | Home app → DT | BBQ state (ON / OFF) |
 | `home/humidifier/state` | Home app → DT | Humidifier state (ON / OFF) |
