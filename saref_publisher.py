@@ -2,7 +2,6 @@ import paho.mqtt.client as mqtt
 import json
 import time
 import threading
-import random
 import os
 from datetime import datetime
 from dotenv import load_dotenv
@@ -46,19 +45,70 @@ except ValueError:
     exit(1)
 
 # Shared state
-
 latest_gps_data = None
 latest_humidity_data = None
 latest_acceleration_data = None
 mqtt_data_lock = threading.Lock()
 
+# Temperature trend simulation — oscillates ±5°C around raw sensor value over 10 seconds
+TEMPERATURE_AMPLITUDE = 5  
+CYCLE_TIME = 10            
 
-def create_saref_message(gps_data, temperature):
-    """Build a JSON-LD message following a SAREF-aligned structure."""
+def get_temperature_with_trend(raw_temperature):
+   
+    cycle_value = (time.time() % CYCLE_TIME) / CYCLE_TIME  
+
+    if cycle_value < 0.5:
+        
+        progress = cycle_value * 2  # 0 to 1
+        temperature = raw_temperature - (progress * TEMPERATURE_AMPLITUDE)
+    else:
+        progress = (cycle_value - 0.5) * 2  # 0 to 1
+        temperature = (raw_temperature - TEMPERATURE_AMPLITUDE) + (progress * TEMPERATURE_AMPLITUDE)
+
+    return temperature
+
+# Humidity trend simulation — oscillates ±5% around raw sensor value over 10 seconds
+HUMIDITY_AMPLITUDE = 5 
+HUMIDITY_CYCLE_TIME = 10  
+
+def get_humidity_with_trend(raw_humidity):
+    """Oscillate humidity ±5% around raw sensor value over 10-second cycle."""
+    cycle_value = (time.time() % HUMIDITY_CYCLE_TIME) / HUMIDITY_CYCLE_TIME  # 0 to 1 over HUMIDITY_CYCLE_TIME seconds
+
+    if cycle_value < 0.5:
+       
+        progress = cycle_value * 2  
+        humidity = raw_humidity - (progress * HUMIDITY_AMPLITUDE)
+    else:
+       
+        progress = (cycle_value - 0.5) * 2 
+        humidity = (raw_humidity - HUMIDITY_AMPLITUDE) + (progress * HUMIDITY_AMPLITUDE)
+
+    return humidity
+
+
+def create_saref_message(gps_data):
     timestamp = datetime.now().isoformat()
 
     car_lat = float(gps_data.get("latitude", 0))
     car_lon = float(gps_data.get("longitude", 0))
+
+    # Simulate car movement: oscillate every 15 seconds (0 km ↔ 6 km)
+    cycle_value = (time.time() % 15) / 15
+    if cycle_value < 0.5:
+        # First 7.5s: moving away (0 → 6 km)
+        distance_frac = 1 - (cycle_value * 2)
+    else:
+        # Next 7.5s: moving closer (6 → 0 km)
+        distance_frac = (cycle_value - 0.5) * 2
+
+    # Convert distance fraction to lat/lon offset (~6 km radius)
+    lat_offset = (distance_frac * 6) / 111
+    lon_offset = (distance_frac * 6) / 111
+
+    car_lat += lat_offset
+    car_lon += lon_offset
 
     return {
         "@context": {
@@ -74,8 +124,6 @@ def create_saref_message(gps_data, temperature):
         "dcterms:issued": timestamp,
 
         "saref:hasMeasurement": [
-
-            # LOCATION
             {
                 "@id": f"urn:measurement:location:car:{timestamp}",
                 "@type": "saref:Measurement",
@@ -85,21 +133,6 @@ def create_saref_message(gps_data, temperature):
                     "geo:lat": car_lat,
                     "geo:long": car_lon
                 }
-            },
-
-            # TEMPERATURE
-            {
-                "@id": f"urn:measurement:temperature:car:{timestamp}",
-                "@type": "saref:Measurement",
-                "dcterms:created": timestamp,
-                "saref:relatesToProperty": {
-                    "@type": "saref:Temperature"
-                },
-                "saref:hasValue": {
-                    "@type": "xsd:float",
-                    "@value": temperature
-                },
-                "saref:hasUnit": "saref:Celsius"
             }
         ],
 
@@ -119,9 +152,13 @@ def create_saref_message(gps_data, temperature):
 
 
 def create_saref_message_humidity(humidity_data):
-    """Build a JSON-LD message for humidity sensor."""
     timestamp = datetime.now().isoformat()
-    humidity_value = float(humidity_data.get("humidity", 0))
+    raw_humidity_value = float(humidity_data.get("humidity", 0))
+    raw_temperature_value = float(humidity_data.get("temperature", 0))
+
+    # APPLY SIMULATED TRENDS TO BOTH TEMPERATURE AND HUMIDITY
+    temperature_value = get_temperature_with_trend(raw_temperature_value)
+    humidity_value = get_humidity_with_trend(raw_humidity_value)
 
     return {
         "@context": {
@@ -148,6 +185,19 @@ def create_saref_message_humidity(humidity_data):
                     "@value": humidity_value
                 },
                 "saref:hasUnit": "saref:Percent"
+            },
+            {
+                "@id": f"urn:measurement:temperature:humidity:{timestamp}",
+                "@type": "saref:Measurement",
+                "dcterms:created": timestamp,
+                "saref:relatesToProperty": {
+                    "@type": "saref:Temperature"
+                },
+                "saref:hasValue": {
+                    "@type": "xsd:float",
+                    "@value": temperature_value
+                },
+                "saref:hasUnit": "saref:Celsius"
             }
         ],
 
@@ -165,7 +215,6 @@ def create_saref_message_humidity(humidity_data):
 
 
 def create_saref_message_acceleration(acc_data):
-    """Build a JSON-LD message for accelerometer sensor."""
     timestamp = datetime.now().isoformat()
     acc_x = float(acc_data.get("accel_x", 0))
     acc_y = float(acc_data.get("accel_y", 0))
@@ -238,16 +287,16 @@ def create_saref_message_acceleration(acc_data):
     }
 
 
-#  Local Mosquitto publisher 
+#  Local Mosquitto publisher
 
-local_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id="saref-publisher-local")
+local_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id="saref-publisher-trend")
 
 def connect_local_broker():
     local_client.connect(LOCAL_MQTT_BROKER, LOCAL_MQTT_PORT, 60)
     local_client.loop_start()
     print(f"[LOCAL MQTT] Connected to {LOCAL_MQTT_BROKER}:{LOCAL_MQTT_PORT}")
 
-# External tracker MQTT callbacks 
+# External tracker MQTT callbacks
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
@@ -278,8 +327,9 @@ def on_message(client, userdata, msg):
 
 #  SAREF publish loop
 def publish_saref_messages():
-    """Every 2 seconds, wrap sensor data in SAREF messages and forward to local broker."""
-    print("[PUBLISHER] Starting SAREF publish loop...")
+    print("[PUBLISHER-TREND] Starting SAREF publish loop with sensor-based oscillation...")
+    print(f"[PUBLISHER-TREND] Temperature oscillates ±{TEMPERATURE_AMPLITUDE}°C around sensor value over {CYCLE_TIME} seconds")
+    print(f"[PUBLISHER-TREND] Humidity oscillates ±{HUMIDITY_AMPLITUDE}% around sensor value over {HUMIDITY_CYCLE_TIME} seconds\n")
 
     while True:
         with mqtt_data_lock:
@@ -289,28 +339,33 @@ def publish_saref_messages():
 
         # Publish GPS data
         if gps_snapshot is not None:
-            temperature = round(random.uniform(15, 35), 2)
-            saref_msg = create_saref_message(gps_snapshot, temperature)
+            saref_msg = create_saref_message(gps_snapshot)
             payload = json.dumps(saref_msg)
             result = local_client.publish(LOCAL_MQTT_TOPIC_GPS, payload, qos=1)
             if result.rc == 0:
-                print(f"\n[PUBLISHER] GPS published to {LOCAL_MQTT_TOPIC_GPS}")
+                print(f"\n[PUBLISHER-TREND] GPS published to {LOCAL_MQTT_TOPIC_GPS}")
             else:
-                print(f"[PUBLISHER] GPS publish failed (rc={result.rc})")
+                print(f"[PUBLISHER-TREND] GPS publish failed (rc={result.rc})")
         else:
-            print("[PUBLISHER] Waiting for GPS data...")
+            print("[PUBLISHER-TREND] Waiting for GPS data...")
 
         # Publish Humidity data
         if humidity_snapshot is not None:
             saref_msg = create_saref_message_humidity(humidity_snapshot)
+            raw_temp = float(humidity_snapshot.get("temperature", 0))
+            raw_humid = float(humidity_snapshot.get("humidity", 0))
+            trending_temp = get_temperature_with_trend(raw_temp)
+            trending_humid = get_humidity_with_trend(raw_humid)
+            cycle_val = (time.time() % HUMIDITY_CYCLE_TIME) / HUMIDITY_CYCLE_TIME
             payload = json.dumps(saref_msg)
             result = local_client.publish(LOCAL_MQTT_TOPIC_HUMID, payload, qos=1)
             if result.rc == 0:
-                print(f"[PUBLISHER] Humidity published to {LOCAL_MQTT_TOPIC_HUMID}")
+                print(f"[DEBUG] Amplitude=±{HUMIDITY_AMPLITUDE}%, cycle_value={cycle_val:.2f}, trending_humid={trending_humid:.1f}")
+                print(f"[PUBLISHER-TREND] Humidity published | Temp: {raw_temp:.1f}°C→{trending_temp:.1f}°C | Humidity: {raw_humid:.1f}%→{trending_humid:.1f}%")
             else:
-                print(f"[PUBLISHER] Humidity publish failed (rc={result.rc})")
+                print(f"[PUBLISHER-TREND] Humidity publish failed (rc={result.rc})")
         else:
-            print("[PUBLISHER] Waiting for Humidity data...")
+            print("[PUBLISHER-TREND] Waiting for Humidity data...")
 
         # Publish Acceleration data
         if acceleration_snapshot is not None:
@@ -318,20 +373,20 @@ def publish_saref_messages():
             payload = json.dumps(saref_msg)
             result = local_client.publish(LOCAL_MQTT_TOPIC_ACC, payload, qos=1)
             if result.rc == 0:
-                print(f"[PUBLISHER] Acceleration published to {LOCAL_MQTT_TOPIC_ACC}")
+                print(f"[PUBLISHER-TREND] Acceleration published to {LOCAL_MQTT_TOPIC_ACC}")
             else:
-                print(f"[PUBLISHER] Acceleration publish failed (rc={result.rc})")
+                print(f"[PUBLISHER-TREND] Acceleration publish failed (rc={result.rc})")
         else:
-            print("[PUBLISHER] Waiting for Acceleration data...")
+            print("[PUBLISHER-TREND] Waiting for Acceleration data...")
 
         time.sleep(2)
 
-#  Main 
+#  Main
 # Connect to local Mosquitto first
 connect_local_broker()
 
 # Connect to external tracker broker
-tracker_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id="saref-publisher-tracker")
+tracker_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id="saref-publisher-trend-tracker")
 tracker_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 tracker_client.on_connect = on_connect
 tracker_client.on_message  = on_message

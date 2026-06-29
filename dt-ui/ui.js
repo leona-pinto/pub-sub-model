@@ -29,11 +29,7 @@ function setDevice(device, state, timestamp) {
   dot.className   = 'dot' + (isOn ? ' on' : '');
   card.className  = 'device-card' + (isOn ? ' active' : '');
 
-  if (device === 'hvac' && state) {
-    sub.textContent = state === 'COOLING' ? 'mode: cooling'
-                    : state === 'HEATING' ? 'mode: heating'
-                    : 'mode: standby';
-  } else if (device === 'humidifier') {
+  if (device === 'humidifier') {
     sub.textContent = isOn ? 'active — low humidity' : 'inactive';
   } else {
     sub.textContent = isOn ? 'powered on' : 'powered off';
@@ -91,7 +87,7 @@ socket.on('sensor-update', (readings) => {
       ? Number(readings.gps.distance).toFixed(2) : '--';
   }
   if (readings.temperature.value != null) {
-    document.getElementById('sen-temp').textContent = Number(readings.temperature.value).toFixed(1) + ' °C';
+    document.getElementById('sen-temp').textContent = Number(readings.temperature.value).toFixed(2) + ' °C';
   }
   if (readings.acceleration.magnitude != null) {
     document.getElementById('sen-mag').textContent = Number(readings.acceleration.magnitude).toFixed(2);

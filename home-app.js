@@ -16,7 +16,7 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, { cors: { origin: "*" } });
 
-// Configuration 
+// Configuration
 
 const MQTT_BROKER = 'mqtt://localhost:1883';
 
@@ -27,9 +27,10 @@ const EXTERNAL_MQTT_PASSWORD = process.env.MQTT_PASSWORD;
 
 const TOPIC_GPS = 'sensor/gps';
 
-const TOPIC_HVAC_COMMAND = 'home/hvac/command';
-const TOPIC_TV_COMMAND   = 'home/tv/command';
-const TOPIC_BBQ_COMMAND  = 'home/bbq/command';
+const TOPIC_HVAC_COMMAND      = 'home/hvac/command';
+const TOPIC_TV_COMMAND        = 'home/tv/command';
+const TOPIC_BBQ_COMMAND       = 'home/bbq/command';
+const TOPIC_HUMIDIFIER_COMMAND = 'home/humidifier/command';
 
 const TOPIC_HVAC_STATE       = 'home/hvac/state';
 const TOPIC_TV_STATE         = 'home/tv/state';
@@ -55,11 +56,15 @@ const GRAPH_BBQ  = "http://example.org/graph/barbecue";
 const HOUSE_LAT = 52.2176;
 const HOUSE_LON = 6.8904;
 
-const HVAC_THRESHOLD_KM     = 3;
+const HVAC_THRESHOLD_KM     = 4;
 const TV_THRESHOLD_KM       = 2;
 const BARBECUE_THRESHOLD_KM = 2;
 
-//Global state 
+// DELTA THRESHOLDS (for temperature/humidity trend-based control)
+const TEMPERATURE_DELTA_THRESHOLD = -2.0;   // Turn ON if cooling 2°C or more per message
+const HUMIDITY_DELTA_THRESHOLD = -0.5;      // Turn ON if humidity drops 0.5% or more per message
+
+//Global state
 
 const graphQueue = [];
 let graphProcessing = false;
@@ -69,6 +74,7 @@ let deviceState = {
   carLatitude:  null,
   carLongitude: null,
   currentTemp:  0,
+  currentHumidity: 0,
   lastUpdate:   null,
   messageCount: 0,
   devices: {
@@ -78,6 +84,9 @@ let deviceState = {
   }
 };
 
+// Track previous values for delta calculation
+let previousTemperature = null;
+let previousHumidity = null;
 let latestHumidity     = null;
 let latestAcceleration = null;
 let isMoving           = false;
@@ -89,7 +98,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'smartHome.html'));
 });
 
-//Helpers 
+//Helpers
 
 function calculateDistance(lat1, lon1, lat2, lon2) {
   const R = 6371;
@@ -102,9 +111,8 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function updateLocationData(distance, temperature, latitude, longitude) {
+function updateLocationData(distance, latitude, longitude) {
   deviceState.carDistance  = distance;
-  deviceState.currentTemp  = temperature;
   deviceState.carLatitude  = latitude;
   deviceState.carLongitude = longitude;
   deviceState.lastUpdate   = new Date().toISOString();
@@ -112,23 +120,23 @@ function updateLocationData(distance, temperature, latitude, longitude) {
 }
 
 function extractDataFromSarefMessage(sarefMsg) {
-  let temperature = null;
   let latitude    = null;
   let longitude   = null;
 
   const measurements = sarefMsg['saref:hasMeasurement'] || [];
+  console.log('[DEBUG] Measurements:', JSON.stringify(measurements, null, 2));
 
   for (const m of measurements) {
     const value    = m['saref:hasValue']?.['@value'];
     const property = m['saref:relatesToProperty'];
     const types    = [].concat(property?.['@type'] || []);
 
-    if (types.includes('saref:Temperature') || types.includes('saref:TemperatureProperty')) {
-      temperature = value;
-    }
+    console.log('[DEBUG] Processing measurement - Types:', types, 'Property:', property);
+
     if (types.includes('geo:Point') || types.includes('saref:Location') || types.includes('saref:LocationProperty')) {
       latitude  = property?.['geo:lat'];
       longitude = property?.['geo:long'];
+      console.log('[DEBUG] Found location - Lat:', latitude, 'Lon:', longitude);
     }
   }
 
@@ -137,7 +145,9 @@ function extractDataFromSarefMessage(sarefMsg) {
     distance = calculateDistance(Number(latitude), Number(longitude), HOUSE_LAT, HOUSE_LON);
   }
 
-  return { distance, temperature, latitude, longitude };
+  console.log('[DEBUG] Final extracted - Distance:', distance, 'Lat:', latitude, 'Lon:', longitude);
+
+  return { distance, latitude, longitude };
 }
 
 function extractHumidityFromSarefMessage(sarefMsg) {
@@ -145,6 +155,20 @@ function extractHumidityFromSarefMessage(sarefMsg) {
   for (const m of measurements) {
     const types = [].concat(m['saref:relatesToProperty']?.['@type'] || []);
     if (types.includes('saref:Humidity')) return m['saref:hasValue']?.['@value'];
+  }
+  return null;
+}
+
+function extractTemperatureFromHumiditySensor(sarefMsg) {
+  const measurements = sarefMsg['saref:hasMeasurement'] || [];
+
+  for (const m of measurements) {
+    const property = m['saref:relatesToProperty'];
+    const types = [].concat(property?.['@type'] || []);
+
+    if (types.includes('saref:Temperature')) {
+      return m['saref:hasValue']?.['@value'];
+    }
   }
   return null;
 }
@@ -166,7 +190,7 @@ function extractAccelerationFromSarefMessage(sarefMsg) {
   return accel;
 }
 
-// GraphDB 
+// GraphDB
 
 async function storeInGraphDB(deviceName, devState, temperature, distance, graphIRI) {
   const writer = new Writer({
@@ -217,7 +241,7 @@ async function processGraphQueue() {
   graphProcessing = false;
 }
 
-// MQTT publish helpers 
+// MQTT publish helpers
 function publishDeviceState(topic, state) {
   const deviceMatch = topic.match(/home\/(\w+)\/state/);
   const deviceName  = deviceMatch ? deviceMatch[1] : 'unknown';
@@ -247,6 +271,9 @@ function publishDeviceState(topic, state) {
 }
 
 function publishLedCommand(animation) {
+  // Hardware format (for LED module)
+  const hardwareCommand = { "animation": animation };
+
   const sarefCommand = {
     "@context": { "saref": "https://saref.etsi.org/core/", "dcterms": "http://purl.org/dc/terms/", "rdfs": "http://www.w3.org/2000/01/rdf-schema#" },
     "@id":   `urn:command:led:${Date.now()}`,
@@ -262,14 +289,15 @@ function publishLedCommand(animation) {
   });
 
   if (trackerClient) {
-    trackerClient.publish(TOPIC_LED_HARDWARE, JSON.stringify({ animation }), { qos: 1 }, (err) => {
+    trackerClient.publish(TOPIC_LED_HARDWARE, JSON.stringify(hardwareCommand), { qos: 1 }, (err) => {
       if (err) console.error(`[LED] Hardware publish failed:`, err.message);
       else     console.log(`[LED] Hardware command sent: ${animation}`);
     });
+
   }
 }
 
-// MQTT clients 
+// MQTT clients
 
 const mqttClient = mqtt.connect(MQTT_BROKER);
 
@@ -278,7 +306,7 @@ if (EXTERNAL_MQTT_BROKER && EXTERNAL_MQTT_USERNAME && EXTERNAL_MQTT_PASSWORD) {
   trackerClient = mqtt.connect(`mqtt://${EXTERNAL_MQTT_BROKER}:${EXTERNAL_MQTT_PORT}`, {
     username: EXTERNAL_MQTT_USERNAME,
     password: EXTERNAL_MQTT_PASSWORD,
-    clientId: `home-app-${Date.now()}`
+    clientId: `home-app-trend-${Date.now()}`
   });
   trackerClient.on('connect', () => console.log(`[TRACKER MQTT] Connected to ${EXTERNAL_MQTT_BROKER}`));
   trackerClient.on('error',   (err) => console.error('[TRACKER MQTT] Error:', err.message));
@@ -290,14 +318,17 @@ mqttClient.on('connect', () => {
   mqttClient.subscribe(TOPIC_GPS,            { qos: 1 });
   mqttClient.subscribe('sensor/humidity',    { qos: 1 });
   mqttClient.subscribe('sensor/acceleration',{ qos: 1 });
-  mqttClient.subscribe(TOPIC_HVAC_COMMAND,   { qos: 1 });
-  mqttClient.subscribe(TOPIC_TV_COMMAND,     { qos: 1 });
-  mqttClient.subscribe(TOPIC_BBQ_COMMAND,    { qos: 1 });
+  mqttClient.subscribe(TOPIC_HVAC_COMMAND,        { qos: 1 });
+  mqttClient.subscribe(TOPIC_TV_COMMAND,         { qos: 1 });
+  mqttClient.subscribe(TOPIC_BBQ_COMMAND,        { qos: 1 });
+  mqttClient.subscribe(TOPIC_HUMIDIFIER_COMMAND, { qos: 1 });
   mqttClient.subscribe(TOPIC_HVAC_STATE,       { qos: 1 });
   mqttClient.subscribe(TOPIC_TV_STATE,         { qos: 1 });
   mqttClient.subscribe(TOPIC_BBQ_STATE,        { qos: 1 });
   mqttClient.subscribe(TOPIC_HUMIDIFIER_STATE, { qos: 1 });
-  console.log('[MQTT] Subscribed to all topics');
+  console.log('[MQTT-TREND] Subscribed to all topics');
+  console.log(`[MQTT-TREND] Temperature delta threshold: ${TEMPERATURE_DELTA_THRESHOLD}°C/sec`);
+  console.log(`[MQTT-TREND] Humidity delta threshold: ${HUMIDITY_DELTA_THRESHOLD}%/sec\n`);
 
   // Publish initial states after 1 second so DT dashboard populates immediately
   setTimeout(() => {
@@ -324,51 +355,39 @@ mqttClient.on('message', (topic, payload) => {
   try {
     const msg = JSON.parse(payload.toString());
 
-    //  GPS telemetry 
+    //  GPS telemetry
     if (topic === TOPIC_GPS) {
-      const { distance, temperature, latitude, longitude } = extractDataFromSarefMessage(msg);
-      if (distance === null || temperature === null) return;
+      const { distance, latitude, longitude } = extractDataFromSarefMessage(msg);
+      if (distance === null) return;
 
-      updateLocationData(distance, temperature, latitude, longitude);
+      updateLocationData(distance, latitude, longitude);
 
-      // HVAC
+      // HVAC — controlled by distance only
       const prevHvac = deviceState.devices.hvac.isPowerOn;
       if (distance <= HVAC_THRESHOLD_KM) {
         deviceState.devices.hvac.isPowerOn = true;
-        deviceState.devices.hvac.mode = temperature > 25 ? 'COOLING' : 'HEATING';
+        deviceState.devices.hvac.mode = 'ON';
       } else {
         deviceState.devices.hvac.isPowerOn = false;
         deviceState.devices.hvac.mode = 'OFF';
       }
-      // Always publish so DT stays in sync
       publishDeviceState(TOPIC_HVAC_STATE, deviceState.devices.hvac.mode);
       if (prevHvac !== deviceState.devices.hvac.isPowerOn) {
         console.log(`[HVAC] State changed! -> ${deviceState.devices.hvac.mode}`);
       }
-      console.log(`[HVAC] Distance: ${distance.toFixed(2)} km | ${deviceState.devices.hvac.mode}`);
+      console.log(`[HVAC] Distance: ${distance.toFixed(2)} km | Power: ${deviceState.devices.hvac.isPowerOn ? 'ON' : 'OFF'}`);
       graphQueue.push({ deviceName: "hvac", state: deviceState.devices.hvac, temperature, distance, graphIRI: GRAPH_HVAC });
-
-      // BBQ
-      const prevBbq = deviceState.devices.barbecue.isPowerOn;
-      deviceState.devices.barbecue.isPowerOn = distance <= BARBECUE_THRESHOLD_KM;
-      // Always publish so DT stays in sync
-      publishDeviceState(TOPIC_BBQ_STATE, deviceState.devices.barbecue.isPowerOn ? 'ON' : 'OFF');
-      if (prevBbq !== deviceState.devices.barbecue.isPowerOn) {
-        console.log(`[BBQ] State changed! -> ${deviceState.devices.barbecue.isPowerOn ? 'ON' : 'OFF'}`);
-      }
-      console.log(`[BBQ] Distance: ${distance.toFixed(2)} km | ${deviceState.devices.barbecue.isPowerOn ? 'ON' : 'OFF'}`);
-      graphQueue.push({ deviceName: "barbecue", state: deviceState.devices.barbecue, temperature, distance, graphIRI: GRAPH_BBQ });
 
       processGraphQueue();
       io.emit('device-state-update', deviceState);
       return;
     }
 
-    //  Commands (DT -> PT) 
+    //  Commands (DT -> PT)
     if (topic === TOPIC_HVAC_COMMAND) {
       const cmd = msg?.['saref:hasCommandKind'];
       console.log(`[HVAC] Command received: ${cmd}`);
-      if (cmd === 'TurnOn'  || cmd === 'TURN_ON')  { deviceState.devices.hvac.isPowerOn = true;  deviceState.devices.hvac.mode = 'HEATING'; }
+      if (cmd === 'TurnOn'  || cmd === 'TURN_ON')  { deviceState.devices.hvac.isPowerOn = true;  deviceState.devices.hvac.mode = 'ON'; }
       if (cmd === 'TurnOff' || cmd === 'TURN_OFF') { deviceState.devices.hvac.isPowerOn = false; deviceState.devices.hvac.mode = 'OFF'; }
       publishDeviceState(TOPIC_HVAC_STATE, deviceState.devices.hvac.mode);
       io.emit('device-state-update', deviceState);
@@ -395,38 +414,90 @@ mqttClient.on('message', (topic, payload) => {
       return;
     }
 
-    //  Humidity sensor 
+    if (topic === TOPIC_HUMIDIFIER_COMMAND) {
+      const cmd = msg?.['saref:hasCommandKind'];
+      console.log(`[HUMIDIFIER] Command received: ${cmd}`);
+      if (cmd === 'TurnOn')  deviceState.devices.hvac.humidifier.isOn = true;
+      if (cmd === 'TurnOff') deviceState.devices.hvac.humidifier.isOn = false;
+      io.emit('device-state-update', deviceState);
+      return;
+    }
+
+    //  Humidity sensor — controls Humidifier + Barbecue (using DELTA thresholds)
     if (topic === 'sensor/humidity') {
       const humidity = extractHumidityFromSarefMessage(msg);
+      const temperature = extractTemperatureFromHumiditySensor(msg);
+
       if (humidity !== null) {
         latestHumidity = parseFloat(humidity);
+        deviceState.currentHumidity = latestHumidity;
+
+        // HUMIDIFIER — controlled by humidity DELTA (rate of change)
+        let humidityDelta = null;
+        if (previousHumidity !== null) {
+          humidityDelta = latestHumidity - previousHumidity;
+        }
+        previousHumidity = latestHumidity;
+
         const prevHumidifier = deviceState.devices.hvac.humidifier.isOn;
-        deviceState.devices.hvac.humidifier.isOn = latestHumidity < 65;
+        if (humidityDelta !== null) {
+          deviceState.devices.hvac.humidifier.isOn = humidityDelta < HUMIDITY_DELTA_THRESHOLD;
+        }
 
         if (prevHumidifier !== deviceState.devices.hvac.humidifier.isOn) {
           console.log(`[HUMIDIFIER] State changed! -> ${deviceState.devices.hvac.humidifier.isOn ? 'ON' : 'OFF'}`);
         }
-
-        // Always publish so DT stays in sync
         publishDeviceState(TOPIC_HUMIDIFIER_STATE, deviceState.devices.hvac.humidifier.isOn ? 'ON' : 'OFF');
 
-        // Store in GraphDB
-        graphQueue.push({
-          deviceName: "humidifier",
-          state:      deviceState.devices.hvac.humidifier.isOn ? 'ON' : 'OFF',
-          temperature: null,
-          distance:    null,
-          graphIRI:   "http://example.org/graph/humidifier"
-        });
-        processGraphQueue();
-
-        console.log(`[HUMIDITY] ${latestHumidity}% | Humidifier: ${deviceState.devices.hvac.humidifier.isOn ? 'ON' : 'OFF'}`);
-        io.emit('device-state-update', deviceState);
+        if (humidityDelta !== null) {
+          console.log(`[HUMIDIFIER] Humidity: ${latestHumidity.toFixed(2)}% | Delta: ${humidityDelta.toFixed(4)}%/msg | Threshold: < ${HUMIDITY_DELTA_THRESHOLD}%/msg | Status: ${deviceState.devices.hvac.humidifier.isOn ? 'ON' : 'OFF'}`);
+        } else {
+          console.log(`[HUMIDIFIER] Humidity: ${latestHumidity.toFixed(2)}% | Delta: N/A (first reading) | Status: ${deviceState.devices.hvac.humidifier.isOn ? 'ON' : 'OFF'}`);
+        }
       }
+
+      if (temperature !== null) {
+        const currentTemp = parseFloat(temperature);
+        deviceState.currentTemp = currentTemp;
+
+        // BARBECUE — controlled by temperature DELTA (rate of change)
+        let tempDelta = null;
+        if (previousTemperature !== null) {
+          tempDelta = currentTemp - previousTemperature;
+        }
+        previousTemperature = currentTemp;
+
+        const prevBbq = deviceState.devices.barbecue.isPowerOn;
+        if (tempDelta !== null) {
+          deviceState.devices.barbecue.isPowerOn = tempDelta < TEMPERATURE_DELTA_THRESHOLD;
+        }
+
+        if (prevBbq !== deviceState.devices.barbecue.isPowerOn) {
+          console.log(`[BBQ] State changed! -> ${deviceState.devices.barbecue.isPowerOn ? 'ON' : 'OFF'}`);
+        }
+        publishDeviceState(TOPIC_BBQ_STATE, deviceState.devices.barbecue.isPowerOn ? 'ON' : 'OFF');
+
+        if (tempDelta !== null) {
+          console.log(`[BBQ] Temperature: ${currentTemp.toFixed(2)}°C | Delta: ${tempDelta.toFixed(4)}°C/msg | Threshold: < ${TEMPERATURE_DELTA_THRESHOLD}°C/msg | Status: ${deviceState.devices.barbecue.isPowerOn ? 'ON' : 'OFF'}`);
+        } else {
+          console.log(`[BBQ] Temperature: ${currentTemp.toFixed(2)}°C | Delta: N/A (first reading) | Status: ${deviceState.devices.barbecue.isPowerOn ? 'ON' : 'OFF'}`);
+        }
+
+        graphQueue.push({
+          deviceName: "barbecue",
+          state: deviceState.devices.barbecue.isPowerOn ? 'ON' : 'OFF',
+          temperature: currentTemp,
+          distance: null,
+          graphIRI: GRAPH_BBQ
+        });
+      }
+
+      processGraphQueue();
+      io.emit('device-state-update', deviceState);
       return;
     }
 
-    //  Accelerometer sensor 
+    //  Accelerometer sensor
     if (topic === 'sensor/acceleration') {
       const accel = extractAccelerationFromSarefMessage(msg);
 
@@ -465,7 +536,7 @@ mqttClient.on('message', (topic, payload) => {
       return;
     }
 
-    //  State confirmations (log only) 
+    //  State confirmations (log only)
     if ([TOPIC_HVAC_STATE, TOPIC_TV_STATE, TOPIC_BBQ_STATE].includes(topic)) {
       console.log(`[MQTT] State confirmation on ${topic}:`, msg?.['saref:hasValue']?.['@value']);
     }
@@ -483,15 +554,16 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => console.log('[Socket.io] Web client disconnected'));
 });
 
-// Start 
+// Start
 
 const PORT = 3000;
 
 server.listen(PORT, () => {
-  console.log(`\n=== Smart Home (MQTT) ===`);
+  console.log(`\n=== Smart Home (MQTT) — TREND-BASED VERSION ===`);
   console.log(`Running on http://localhost:${PORT}`);
   console.log(`House: ${HOUSE_LAT}, ${HOUSE_LON}`);
   console.log(`Thresholds: HVAC ${HVAC_THRESHOLD_KM}km | BBQ ${BARBECUE_THRESHOLD_KM}km\n`);
+  console.log(`⚠️  NOTE: Run with saref_publisher-trend.py for temperature trend simulation\n`);
 });
 
 process.on('SIGINT', () => {

@@ -9,36 +9,42 @@ function updateLocation(deviceState) {
   document.getElementById('distance-value').textContent = carDistance !== null ? carDistance.toFixed(2) : '--';
 }
 
-// Update temperature card
+// Update temperature and humidity card
 function updateTemperature(deviceState) {
   const { currentTemp } = deviceState;
   document.getElementById('temperature-value').textContent = currentTemp !== null ? currentTemp.toFixed(2) + ' °C' : '-- °C';
 }
 
-// Update HVAC card with status and mode
+// Update humidity display
+function updateHumidity(deviceState) {
+  const { currentHumidity } = deviceState;
+  document.getElementById('humidity-value').textContent = currentHumidity !== null ? currentHumidity.toFixed(1) + ' %' : '-- %';
+}
+
+// Update HVAC card status and humidifier
 function updateHvac(hvacDevice) {
   const hvacStatus = document.getElementById('hvac-status');
   const hvacText = document.getElementById('hvac-text');
-  const hvacMode = document.getElementById('hvac-mode');
-  const hvacModeText = document.getElementById('hvac-mode-text');
 
   if (hvacDevice.isPowerOn) {
     hvacStatus.classList.add('on');
     hvacStatus.classList.remove('off');
     hvacText.textContent = 'ON';
-
-    // Show heating or cooling mode
-    hvacMode.style.display = 'flex';
-    if (hvacDevice.mode === 'HEATING') {
-      hvacModeText.textContent = 'Heating';
-    } else if (hvacDevice.mode === 'COOLING') {
-      hvacModeText.textContent = 'Cooling';
-    }
   } else {
     hvacStatus.classList.remove('on');
     hvacStatus.classList.add('off');
     hvacText.textContent = 'OFF';
-    hvacMode.style.display = 'none';
+  }
+
+  // Update humidifier status
+  if (hvacDevice.humidifier && hvacDevice.humidifier.isOn) {
+    document.getElementById('humidifier-status').classList.add('on');
+    document.getElementById('humidifier-status').classList.remove('off');
+    document.getElementById('humidifier-text').textContent = 'ON';
+  } else {
+    document.getElementById('humidifier-status').classList.remove('on');
+    document.getElementById('humidifier-status').classList.add('off');
+    document.getElementById('humidifier-text').textContent = 'OFF';
   }
 }
 
@@ -90,6 +96,7 @@ socket.on('device-state-update', (deviceState) => {
   // Update all elements
   updateLocation(deviceState);
   updateTemperature(deviceState);
+  updateHumidity(deviceState);
   updateHvac(deviceState.devices.hvac);
   updateTv(deviceState.devices.tv);
   updateBarbecue(deviceState.devices.barbecue);

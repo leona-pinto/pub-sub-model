@@ -71,7 +71,7 @@
     .cmd-panel { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 10px; padding: 4px 0; margin-bottom: 24px; }
     .cmd-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 0.5px solid var(--border); }
     .cmd-row:last-child { border-bottom: none; }
-    .cmd-device { font-size: 14px; letter-spacing: 0.15em; color: var(--muted); text-transform: uppercase; width: 44px; flex-shrink: 0; }
+    .cmd-device { font-size: 14px; letter-spacing: 0.15em; color: var(--muted); text-transform: uppercase; width: 100px; flex-shrink: 0; }
     .cmd-btns { display: flex; gap: 6px; flex-wrap: wrap; }
     .cmd-btn { font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em; padding: 5px 13px; border-radius: 5px; border: 0.5px solid var(--border2); background: transparent; color: var(--muted); cursor: pointer; transition: all 0.1s; }
     .cmd-btn:hover.on-btn  { background: var(--green-bg);  color: var(--green);  border-color: rgba(61,220,132,0.4); }
@@ -196,6 +196,14 @@
         <button class="cmd-btn off-btn" onclick="sendCommand('bbq','TurnOff')">TURN_OFF</button>
       </div>
       <span class="cmd-status" id="cmdstat-bbq"></span>
+    </div>
+    <div class="cmd-row">
+      <span class="cmd-device">HUMIDIFIER</span>
+      <div class="cmd-btns">
+        <button class="cmd-btn on-btn"  onclick="sendCommand('humidifier','TurnOn')">TURN_ON</button>
+        <button class="cmd-btn off-btn" onclick="sendCommand('humidifier','TurnOff')">TURN_OFF</button>
+      </div>
+      <span class="cmd-status" id="cmdstat-humidifier"></span>
     </div>
     <div class="cmd-row">
       <span class="cmd-device">LED</span>

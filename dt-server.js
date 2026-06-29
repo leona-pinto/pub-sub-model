@@ -35,9 +35,10 @@ const TOPIC_BBQ_STATE        = 'home/bbq/state';
 const TOPIC_HUMIDIFIER_STATE = 'home/humidifier/state';
 const TOPIC_LED_SEMANTIC     = 'home/led/command';
 
-const TOPIC_HVAC_COMMAND = 'home/hvac/command';
-const TOPIC_TV_COMMAND   = 'home/tv/command';
-const TOPIC_BBQ_COMMAND  = 'home/bbq/command';
+const TOPIC_HVAC_COMMAND       = 'home/hvac/command';
+const TOPIC_TV_COMMAND         = 'home/tv/command';
+const TOPIC_BBQ_COMMAND        = 'home/bbq/command';
+const TOPIC_HUMIDIFIER_COMMAND = 'home/humidifier/command';
 
 const TOPIC_LED_HARDWARE = `trackers/${process.env.MQTT_USER || 'HTIT_51'}/leds/set`;
 
@@ -109,14 +110,15 @@ if (EXTERNAL_MQTT_BROKER && EXTERNAL_MQTT_USERNAME && EXTERNAL_MQTT_PASSWORD) {
 // ── Send device command (DT → PT) ────────────────────────────────────────────
 
 function sendCommand(device, command) {
-  const topicMap = { hvac: TOPIC_HVAC_COMMAND, tv: TOPIC_TV_COMMAND, bbq: TOPIC_BBQ_COMMAND };
+  const topicMap = { hvac: TOPIC_HVAC_COMMAND, tv: TOPIC_TV_COMMAND, bbq: TOPIC_BBQ_COMMAND, humidifier: TOPIC_HUMIDIFIER_COMMAND };
   const topic    = topicMap[device];
   if (!topic) { console.warn(`[DT] Unknown device: ${device}`); return; }
 
   const deviceMap = {
-    hvac: { urn: 'urn:device:home:smart-hvac',     label: 'Smart HVAC',     propertyType: 'saref:OperatingMode' },
-    tv:   { urn: 'urn:device:home:smart-tv',       label: 'Smart TV',       propertyType: 'saref:OnOffState' },
-    bbq:  { urn: 'urn:device:home:smart-barbecue', label: 'Smart Barbecue', propertyType: 'saref:OnOffState' }
+    hvac:      { urn: 'urn:device:home:smart-hvac',       label: 'Smart HVAC',       propertyType: 'saref:OperatingMode' },
+    tv:        { urn: 'urn:device:home:smart-tv',         label: 'Smart TV',         propertyType: 'saref:OnOffState' },
+    bbq:       { urn: 'urn:device:home:smart-barbecue',   label: 'Smart Barbecue',   propertyType: 'saref:OnOffState' },
+    humidifier: { urn: 'urn:device:home:smart-humidifier', label: 'Smart Humidifier', propertyType: 'saref:OnOffState' }
   };
   const deviceInfo = deviceMap[device] || { urn: `urn:device:home:${device}`, label: device, propertyType: 'saref:Property' };
   const timestamp  = new Date().toISOString();
@@ -303,9 +305,15 @@ mqttClient.on('message', (topic, payload) => {
       const measurements = msg['saref:hasMeasurement'] || [];
       for (const m of measurements) {
         const types = [].concat(m['saref:relatesToProperty']?.['@type'] || []);
+        const value = m['saref:hasValue']?.['@value'];
+
         if (types.includes('saref:Humidity')) {
-          sensorReadings.humidity.value     = m['saref:hasValue']?.['@value'];
+          sensorReadings.humidity.value     = value;
           sensorReadings.humidity.timestamp = timestamp;
+        }
+        if (types.includes('saref:Temperature')) {
+          sensorReadings.temperature.value     = value;
+          sensorReadings.temperature.timestamp = timestamp;
         }
       }
       io.emit('sensor-update', sensorReadings);

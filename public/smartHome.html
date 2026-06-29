@@ -34,11 +34,15 @@
 
       <!-- Temperature Card -->
       <section class="card temperature-card">
-        <h2>Temperature</h2>
+        <h2>Temperature & Humidity</h2>
         <div class="data-grid">
           <div class="data-item">
             <label>Current Temp:</label>
             <span id="temperature-value" class="value">-- °C</span>
+          </div>
+          <div class="data-item">
+            <label>Humidity:</label>
+            <span id="humidity-value" class="value">-- %</span>
           </div>
         </div>
       </section>
@@ -49,8 +53,13 @@
         <div class="status-display" id="hvac-status">
           <div class="status-text" id="hvac-text">OFF</div>
         </div>
-        <div class="hvac-mode" id="hvac-mode" style="display: none;">
-          <span id="hvac-mode-text">--</span>
+
+        <!-- Humidifier subsystem -->
+        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
+          <h3 style="font-size: 14px; margin: 0 0 10px 0;">HUMIDIFIER</h3>
+          <div class="status-display" id="humidifier-status">
+            <div class="status-text" id="humidifier-text">OFF</div>
+          </div>
         </div>
       </section>
 
