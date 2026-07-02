@@ -362,6 +362,7 @@ def publish_saref_messages():
             if result.rc == 0:
                 print(f"[DEBUG] Amplitude=±{HUMIDITY_AMPLITUDE}%, cycle_value={cycle_val:.2f}, trending_humid={trending_humid:.1f}")
                 print(f"[PUBLISHER-TREND] Humidity published | Temp: {raw_temp:.1f}°C→{trending_temp:.1f}°C | Humidity: {raw_humid:.1f}%→{trending_humid:.1f}%")
+                print(saref_msg)
             else:
                 print(f"[PUBLISHER-TREND] Humidity publish failed (rc={result.rc})")
         else:

@@ -20,7 +20,7 @@ app.get('/ui', (req, res) => {
   res.sendFile(path.join(__dirname, 'dt-ui', 'index.html'));
 });
 
-// ── MQTT topics ───────────────────────────────────────────────────────────────
+//  MQTT topics 
 
 const MQTT_BROKER = 'mqtt://localhost:1883';
 
@@ -42,7 +42,7 @@ const TOPIC_HUMIDIFIER_COMMAND = 'home/humidifier/command';
 
 const TOPIC_LED_HARDWARE = `trackers/${process.env.MQTT_USER || 'HTIT_51'}/leds/set`;
 
-// ── Digital Twin state ────────────────────────────────────────────────────────
+//  Digital Twin state 
 
 const latestState = { tv: null, hvac: null, bbq: null, led: null, humidifier: null };
 const history     = { tv: [],   hvac: [],   bbq: [],   led: [],   humidifier: []   };
@@ -54,7 +54,7 @@ const sensorReadings = {
   humidity:     { value: null, timestamp: null }
 };
 
-// ── GraphDB ───────────────────────────────────────────────────────────────────
+// GraphDB
 
 async function storeStateTriple(device, state, timestamp) {
   const rdf = `
@@ -92,8 +92,7 @@ INSERT DATA {
   }
 }
 
-// ── MQTT clients ──────────────────────────────────────────────────────────────
-
+//MQTT clients 
 const mqttClient = mqtt.connect(MQTT_BROKER);
 
 let trackerClient = null;
@@ -107,8 +106,7 @@ if (EXTERNAL_MQTT_BROKER && EXTERNAL_MQTT_USERNAME && EXTERNAL_MQTT_PASSWORD) {
   trackerClient.on('error',   (err) => console.error('[DT] External broker error:', err.message));
 }
 
-// ── Send device command (DT → PT) ────────────────────────────────────────────
-
+// Send device command (DT -> PT) 
 function sendCommand(device, command) {
   const topicMap = { hvac: TOPIC_HVAC_COMMAND, tv: TOPIC_TV_COMMAND, bbq: TOPIC_BBQ_COMMAND, humidifier: TOPIC_HUMIDIFIER_COMMAND };
   const topic    = topicMap[device];
@@ -140,7 +138,7 @@ function sendCommand(device, command) {
   });
 }
 
-// ── Send LED command ──────────────────────────────────────────────────────────
+// Send LED command 
 
 function sendLedCommand(animation) {
   const timestamp = new Date().toISOString();
@@ -171,18 +169,16 @@ function sendLedCommand(animation) {
   storeCommandTriple('led', animation, timestamp);
 }
 
-// ── Extract state value from SAREF state message ──────────────────────────────
+//  Extract state value from SAREF state message 
 
 function extractState(payload) {
-  // Handles saref:hasValue (current format from publishDeviceState)
-  // and saref:hasState (legacy format) 
+   
   return payload?.['saref:hasValue']?.['@value']
       || payload?.['saref:hasState']?.['@value']
       || null;
 }
 
-// ── MQTT ──────────────────────────────────────────────────────────────────────
-
+//  MQTT
 mqttClient.on('connect', () => {
   console.log('[DT] Connected to local MQTT broker');
 
@@ -192,7 +188,7 @@ mqttClient.on('connect', () => {
   mqttClient.subscribe(TOPIC_HUMIDIFIER_STATE, { qos: 1 });
   mqttClient.subscribe(TOPIC_LED_SEMANTIC,     { qos: 1 });
 
-  // Sensor reading topics — DT subscribes to show live readings on dashboard
+  // Sensor reading topics: DT subscribes to show live readings on dashboard
   mqttClient.subscribe('sensor/gps',          { qos: 1 });
   mqttClient.subscribe('sensor/acceleration', { qos: 1 });
   mqttClient.subscribe('sensor/humidity',     { qos: 1 });
@@ -206,7 +202,7 @@ mqttClient.on('message', (topic, payload) => {
     const msg       = JSON.parse(payload.toString());
     const timestamp = new Date().toISOString();
 
-    // ── Device state updates (home-app → DT) ─────────────────────────────────
+    //  Device state updates (home-app -> DT) 
     const stateTopicMap = {
       [TOPIC_TV_STATE]:         'tv',
       [TOPIC_HVAC_STATE]:       'hvac',
@@ -235,7 +231,7 @@ mqttClient.on('message', (topic, payload) => {
       return;
     }
 
-    // ── LED tracking ──────────────────────────────────────────────────────────
+    //  LED tracking 
     if (topic === TOPIC_LED_SEMANTIC) {
       const animation = msg?.['saref:hasCommandKind'] || null;
       if (!animation) return;
@@ -253,7 +249,7 @@ mqttClient.on('message', (topic, payload) => {
       return;
     }
 
-    // ── Live sensor readings (for dashboard display only) ─────────────────────
+    //  Live sensor readings (for dashboard display only) 
     if (topic === 'sensor/gps') {
       const measurements = msg['saref:hasMeasurement'] || [];
       for (const m of measurements) {
@@ -325,8 +321,7 @@ mqttClient.on('message', (topic, payload) => {
   }
 });
 
-// ── REST API ──────────────────────────────────────────────────────────────────
-
+//  REST API 
 app.post('/api/command', (req, res) => {
   const { device, command } = req.body;
   try {
@@ -350,7 +345,7 @@ app.post('/api/led-command', (req, res) => {
   }
 });
 
-// ── Socket.io ─────────────────────────────────────────────────────────────────
+//  Socket.io 
 
 io.on('connection', (socket) => {
   console.log('[DT] UI client connected');
@@ -358,7 +353,7 @@ io.on('connection', (socket) => {
   socket.emit('sensor-update', sensorReadings);
 });
 
-// ── Start ─────────────────────────────────────────────────────────────────────
+// Start 
 
 server.listen(PORT, () => {
   console.log(`[DT] UI running on http://localhost:${PORT}/ui`);
